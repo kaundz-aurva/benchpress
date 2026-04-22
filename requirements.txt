@@ -1,0 +1,7 @@
+# Generated after checking project imports and running:
+# python3 -m pip freeze
+#
+# Benchpress currently uses only the Python standard library and local modules.
+# The current environment reported wheel==0.45.1, but wheel is not required
+# for runtime or tests, so no third-party packages are pinned here.
+
