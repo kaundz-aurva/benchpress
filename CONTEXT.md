@@ -10,6 +10,7 @@ Current implementation status:
 - Adapter contracts, agent-backed adapters, local transport, and HammerDB runner live in `adapters/`.
 - FastAPI SQL Server agent and HTTP client live in `agents/sqlserver/`.
 - SQL/TCL/PowerShell asset generation lives in `scripts/`.
+- Markdown/CSV report generation over SQLite results and run artifacts lives in `reporting/`.
 - VM-facing JSON examples live in `examples/`.
 - Tests use `unittest`, FastAPI `TestClient`, HTTPX mock transports, and fake adapters under `tests/`.
 
@@ -25,9 +26,15 @@ Important constraints:
 Verification commands:
 
 - `env/bin/python -m unittest discover -s tests`
-- `env/bin/python -m compileall agents adapters config orchestration db scripts tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py`
+- `env/bin/python -m compileall agents adapters config orchestration db scripts reporting tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py`
+
+Reporting workflow:
+
+- `python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary2304-test1.md`
+- Exports `runs.csv`, `aggregates.csv`, `overhead.csv`, and `failures.csv` beside the Markdown report by default.
+- Excludes failed/skipped/incomplete runs from aggregates while keeping them visible in diagnostics.
 
 Known follow-up gaps:
 
 - Validate generated SQL Server audit, HammerDB TCL, and logman scripts on real benchmark VMs.
-- Add reporting, chart generation, and dashboard layers over SQLite data.
+- Add chart generation and dashboard layers over SQLite data.

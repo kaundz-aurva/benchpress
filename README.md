@@ -129,6 +129,29 @@ python -m benchpress_orchestrator --spec examples/benchmark_spec.example.json
 
 The orchestrator creates the SQLite DB configured by `storage.sqlite_path` and writes raw run artifacts under `storage.output_root`.
 
+## Generate Reports
+
+After a run, generate a Markdown report and CSV exports from the SQLite database:
+
+```bash
+python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary2304-test1.md
+```
+
+By default, CSV files are written under the Markdown file's sibling `csv/` directory:
+
+- `runs.csv`: one row per run with dimensions, status, phase, output directory, and flattened workload metrics.
+- `aggregates.csv`: successful runs grouped by audit mode and virtual user count.
+- `overhead.csv`: `audit_on` compared against `audit_off` for matching virtual user counts.
+- `failures.csv`: persisted errors plus failed, skipped, or incomplete runs.
+
+The report prefers workload metrics from `run_summaries.metrics_json["workload"]`. If TPM/NOPM are missing, it also checks registered workload artifacts such as `hammerdb_stdout.txt` for `key=value` metrics unless disabled:
+
+```bash
+python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary.md --no-artifact-fallback
+```
+
+Failed, skipped, and incomplete runs are shown in diagnostics but excluded from aggregate and audit overhead calculations. For TPM/NOPM, a negative percent change means `audit_on` throughput was lower than `audit_off`.
+
 ## Development
 
 Run tests:
@@ -140,7 +163,7 @@ env/bin/python -m unittest discover -s tests
 Run a syntax check:
 
 ```bash
-env/bin/python -m compileall agents adapters config orchestration db scripts tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py
+env/bin/python -m compileall agents adapters config orchestration db scripts reporting tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py
 ```
 
 Tests use fakes, FastAPI `TestClient`, temp directories, and temp SQLite DBs. They do not require real SQL Server, HammerDB, Windows VMs, or network access.
@@ -151,6 +174,7 @@ Tests use fakes, FastAPI `TestClient`, temp directories, and temp SQLite DBs. Th
 - `adapters/`: database, host, transport, and workload adapter seams plus concrete implementations.
 - `config/`: JSON runtime spec DTOs and run-matrix configuration.
 - `scripts/`: asset generation for SQL audit, HammerDB, and Windows metrics files.
+- `reporting/`: Markdown and CSV report generation from SQLite results and run artifacts.
 - `orchestration/`: domain models and benchmark lifecycle service.
 - `db/`: SQLite schema and repository.
 - `examples/`: real-run JSON spec templates.
