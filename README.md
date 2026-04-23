@@ -131,10 +131,22 @@ The orchestrator creates the SQLite DB configured by `storage.sqlite_path` and w
 
 ## Generate Reports
 
-After a run, generate a Markdown report and CSV exports from the SQLite database:
+After a run, generate Markdown and HTML reports plus CSV exports from the SQLite database:
 
 ```bash
 python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary2304-test1.md
+```
+
+By default, the HTML report is written beside the Markdown file with a `.html` suffix. Use `--html-out` to choose another path:
+
+```bash
+python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary.md --html-out reports/summary.html
+```
+
+Artifact reads are constrained to a trusted base directory. By default this is the SQLite database parent directory; use `--artifact-root` when the run output directory lives somewhere else:
+
+```bash
+python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary.md --artifact-root /path/to/benchpress/outputs
 ```
 
 By default, CSV files are written under the Markdown file's sibling `csv/` directory:
@@ -143,6 +155,11 @@ By default, CSV files are written under the Markdown file's sibling `csv/` direc
 - `aggregates.csv`: successful runs grouped by audit mode and virtual user count.
 - `overhead.csv`: `audit_on` compared against `audit_off` for matching virtual user counts.
 - `failures.csv`: persisted errors plus failed, skipped, or incomplete runs.
+- `host_runs.csv`: one row per run with CPU and memory summaries from host metrics.
+- `host_aggregates.csv`: successful runs with host metrics grouped by audit mode and virtual user count.
+- `host_overhead.csv`: `audit_on` CPU/memory averages compared against `audit_off` for matching virtual user counts.
+- `host_samples.csv`: normalized timestamped CPU/memory samples for graph/debug use.
+- `host_metrics_cache.json`: a sidecar cache used to avoid reparsing unchanged PerfMon CSV artifacts on repeated report generation.
 
 The report prefers workload metrics from `run_summaries.metrics_json["workload"]`. If TPM/NOPM are missing, it also checks registered workload artifacts such as `hammerdb_stdout.txt` for `key=value` metrics unless disabled:
 
@@ -150,7 +167,7 @@ The report prefers workload metrics from `run_summaries.metrics_json["workload"]
 python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary.md --no-artifact-fallback
 ```
 
-Failed, skipped, and incomplete runs are shown in diagnostics but excluded from aggregate and audit overhead calculations. For TPM/NOPM, a negative percent change means `audit_on` throughput was lower than `audit_off`.
+The HTML report includes inline SVG graphs for per-VU `audit_off` vs `audit_on` CPU/memory averages and per-run time-series charts when Windows PerfMon CSV artifacts are available. Host metrics are parsed from `host_metrics_csv` artifacts produced by the generated stop-metrics script. Failed, skipped, and incomplete runs are shown in diagnostics but excluded from aggregate and audit overhead calculations. For TPM/NOPM, a negative percent change means `audit_on` throughput was lower than `audit_off`.
 
 ## Development
 

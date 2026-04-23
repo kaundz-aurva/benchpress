@@ -35,6 +35,7 @@ class ReportSourceRun:
     database_engine: str
     database_version: str
     cloud_provider: str
+    target_memory_gb: int
     workload_name: str
     workload_tool: str
     virtual_users: int
@@ -64,6 +65,7 @@ class ReportRunRow:
     benchmark_name: str
     workload_name: str
     workload_tool: str
+    target_memory_gb: int
     audit_mode: str
     virtual_users: int
     repetition: int
@@ -74,11 +76,15 @@ class ReportRunRow:
     updated_at: str
     summary_notes: str
     workload_metrics: dict[str, Any] = field(default_factory=dict)
+    host_metrics: dict[str, Any] = field(default_factory=dict)
+    host_samples: tuple["HostMetricSample", ...] = ()
     artifacts: tuple[ReportArtifact, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         object.__setattr__(self, "workload_metrics", dict(self.workload_metrics))
+        object.__setattr__(self, "host_metrics", dict(self.host_metrics))
+        object.__setattr__(self, "host_samples", tuple(self.host_samples))
         object.__setattr__(self, "artifacts", tuple(self.artifacts))
 
 
@@ -88,6 +94,19 @@ class MetricStats:
     mean: float
     minimum: float
     maximum: float
+
+
+@dataclass(frozen=True)
+class HostMetricSample:
+    run_id: int
+    sample_index: int
+    timestamp: str
+    total_cpu_percent: float | None = None
+    sql_cpu_percent: float | None = None
+    available_memory_mb: float | None = None
+    memory_used_mb: float | None = None
+    memory_used_percent: float | None = None
+    sql_working_set_mb: float | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +150,8 @@ class ReportDocument:
     runs: tuple[ReportRunRow, ...]
     aggregates: tuple[AggregateRow, ...]
     overhead: tuple[OverheadRow, ...]
+    host_aggregates: tuple[AggregateRow, ...]
+    host_overhead: tuple[OverheadRow, ...]
     failures: tuple[FailureRow, ...]
 
     def __post_init__(self) -> None:
@@ -139,4 +160,6 @@ class ReportDocument:
         object.__setattr__(self, "runs", tuple(self.runs))
         object.__setattr__(self, "aggregates", tuple(self.aggregates))
         object.__setattr__(self, "overhead", tuple(self.overhead))
+        object.__setattr__(self, "host_aggregates", tuple(self.host_aggregates))
+        object.__setattr__(self, "host_overhead", tuple(self.host_overhead))
         object.__setattr__(self, "failures", tuple(self.failures))

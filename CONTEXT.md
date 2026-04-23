@@ -31,7 +31,8 @@ Verification commands:
 Reporting workflow:
 
 - `python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summary2304-test1.md`
-- Exports `runs.csv`, `aggregates.csv`, `overhead.csv`, and `failures.csv` beside the Markdown report by default.
+- Writes Markdown plus an HTML report with inline SVG CPU/memory graphs; use `--html-out` to override the default `.html` sibling path.
+- Exports workload CSVs plus `host_runs.csv`, `host_aggregates.csv`, `host_overhead.csv`, and `host_samples.csv` beside the Markdown report by default.
 - Excludes failed/skipped/incomplete runs from aggregates while keeping them visible in diagnostics.
 
 Known follow-up gaps:

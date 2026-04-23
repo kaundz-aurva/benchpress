@@ -41,6 +41,7 @@ class ReportingRepository:
                 benchmark_profiles.database_engine,
                 benchmark_profiles.database_version,
                 benchmark_profiles.cloud_provider,
+                target_hosts.memory_gb AS target_memory_gb,
                 workload_profiles.name AS workload_name,
                 workload_profiles.tool AS workload_tool,
                 workload_profiles.virtual_users,
@@ -51,6 +52,8 @@ class ReportingRepository:
             FROM runs
             JOIN benchmark_profiles
                 ON benchmark_profiles.id = runs.benchmark_profile_id
+            JOIN hosts AS target_hosts
+                ON target_hosts.id = runs.target_host_id
             JOIN workload_profiles
                 ON workload_profiles.id = runs.workload_profile_id
             JOIN audit_profiles
@@ -69,6 +72,7 @@ class ReportingRepository:
                 database_engine=row["database_engine"],
                 database_version=row["database_version"],
                 cloud_provider=row["cloud_provider"],
+                target_memory_gb=row["target_memory_gb"],
                 workload_name=row["workload_name"],
                 workload_tool=row["workload_tool"],
                 virtual_users=row["virtual_users"],
