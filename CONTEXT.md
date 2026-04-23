@@ -11,6 +11,7 @@ Current implementation status:
 - FastAPI SQL Server agent and HTTP client live in `agents/sqlserver/`.
 - SQL/TCL/PowerShell asset generation lives in `scripts/`.
 - Markdown/CSV report generation over SQLite results and run artifacts lives in `reporting/`.
+- Live run observation and Textual terminal UI live in `observer/`.
 - VM-facing JSON examples live in `examples/`.
 - Tests use `unittest`, FastAPI `TestClient`, HTTPX mock transports, and fake adapters under `tests/`.
 
@@ -26,7 +27,7 @@ Important constraints:
 Verification commands:
 
 - `env/bin/python -m unittest discover -s tests`
-- `env/bin/python -m compileall agents adapters config orchestration db scripts reporting tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py`
+- `env/bin/python -m compileall agents adapters config orchestration db observer scripts reporting tests benchpress_orchestrator.py benchpress_observer.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py`
 
 Reporting workflow:
 
@@ -34,6 +35,12 @@ Reporting workflow:
 - Writes Markdown plus an HTML report with inline SVG CPU/memory graphs; use `--html-out` to override the default `.html` sibling path.
 - Exports workload CSVs plus `host_runs.csv`, `host_aggregates.csv`, `host_overhead.csv`, and `host_samples.csv` beside the Markdown report by default.
 - Excludes failed/skipped/incomplete runs from aggregates while keeping them visible in diagnostics.
+
+Observer workflow:
+
+- `python -m benchpress_observer --db benchpress.sqlite3`
+- Attaches read-only to the SQLite DB and artifact directory for live run observation on the client VM.
+- Default view is a dashboard; use `:runs` to open the full run table and `Enter` to drill into run details and previewable text artifacts.
 
 Known follow-up gaps:
 

@@ -29,6 +29,7 @@ The orchestrator owns run state and SQLite persistence. The SQL Server agent exp
 - Agent-backed `DatabaseAdapter` and `HostAdapter` implementations.
 - Local transport for running HammerDB on the client VM.
 - SQLite persistence for benchmark profiles, hosts, workloads, audit modes, runs, artifacts, summaries, and errors.
+- Live Textual-based observer CLI for watching run state from the client VM.
 - Run matrix generation across audit modes, VU ladder, and repetitions.
 - Raw artifact collection from both client-side HammerDB and SQL Server VM agent.
 - Deterministic generation of SQL Server audit SQL, HammerDB TPROC-C TCL, and Windows PerfMon/logman scripts from JSON.
@@ -129,6 +130,30 @@ python -m benchpress_orchestrator --spec examples/benchmark_spec.example.json
 
 The orchestrator creates the SQLite DB configured by `storage.sqlite_path` and writes raw run artifacts under `storage.output_root`.
 
+## Observe Live Runs
+
+Attach the observer CLI to an existing Benchpress SQLite database while the orchestrator is running:
+
+```bash
+python -m benchpress_observer --db benchpress.sqlite3
+```
+
+If you already have the runtime spec, the observer can also derive the DB and default artifact root from it:
+
+```bash
+python -m benchpress_observer --spec examples/benchmark_spec.example.json
+```
+
+Key interactions:
+
+- `:` opens command mode.
+- `:q` quits.
+- `:runs` opens the run table from the dashboard.
+- Arrow keys move the current selection in the run and artifact lists.
+- `Enter` drills from runs into details, then into previewable text artifacts.
+- `?` opens the shortcuts/commands help screen.
+- `:refresh 5` changes the auto-refresh interval to 5 seconds.
+
 ## Generate Reports
 
 After a run, generate Markdown and HTML reports plus CSV exports from the SQLite database:
@@ -180,7 +205,7 @@ env/bin/python -m unittest discover -s tests
 Run a syntax check:
 
 ```bash
-env/bin/python -m compileall agents adapters config orchestration db scripts reporting tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py
+env/bin/python -m compileall agents adapters config orchestration db observer scripts reporting tests benchpress_orchestrator.py benchpress_observer.py sqlserver_agent.py generate_benchmark_assets.py generate_benchmark_report.py
 ```
 
 Tests use fakes, FastAPI `TestClient`, temp directories, and temp SQLite DBs. They do not require real SQL Server, HammerDB, Windows VMs, or network access.
@@ -192,6 +217,7 @@ Tests use fakes, FastAPI `TestClient`, temp directories, and temp SQLite DBs. Th
 - `config/`: JSON runtime spec DTOs and run-matrix configuration.
 - `scripts/`: asset generation for SQL audit, HammerDB, and Windows metrics files.
 - `reporting/`: Markdown and CSV report generation from SQLite results and run artifacts.
+- `observer/`: live terminal observer data layer and Textual UI.
 - `orchestration/`: domain models and benchmark lifecycle service.
 - `db/`: SQLite schema and repository.
 - `examples/`: real-run JSON spec templates.
