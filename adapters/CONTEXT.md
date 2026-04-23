@@ -16,5 +16,4 @@ Rules:
 - Orchestration should depend on these abstractions, not concrete implementations.
 - Tests should use fakes instead of real remote infrastructure.
 
-Current concrete implementations are first-pass stubs or scaffolds for SQL Server, Windows, and HammerDB.
-
+Current concrete implementations include SQL Server/Windows direct stubs, SQL Server agent-backed adapters, local transport for client VM execution, and HammerDB workload execution.

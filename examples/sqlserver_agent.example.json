@@ -1,0 +1,17 @@
+{
+  "bearer_token_env": "BENCHPRESS_AGENT_TOKEN",
+  "sql_connection_name": "localhost",
+  "sqlcmd_path": "sqlcmd",
+  "staging_root": "C:/benchpress/agent_artifacts",
+  "command_timeout_seconds": 120,
+  "enable_audit_sql_file": "C:/benchpress/generated/audit_enable.sql",
+  "disable_audit_sql_file": "C:/benchpress/generated/audit_disable.sql",
+  "pre_snapshot_sql_file": "C:/benchpress/generated/audit_snapshot_pre.sql",
+  "post_snapshot_sql_file": "C:/benchpress/generated/audit_snapshot_post.sql",
+  "sanity_check_sql": "SELECT @@VERSION AS sqlserver_version",
+  "database_metadata_sql_file": "C:/benchpress/generated/audit_metadata.sql",
+  "metrics_start_command": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/benchpress/scripts/start_metrics.ps1"],
+  "metrics_stop_command": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/benchpress/scripts/stop_metrics.ps1"],
+  "filesystem_stats_command": ["powershell", "-NoProfile", "-Command", "Get-PSDrive -PSProvider FileSystem | ConvertTo-Json"],
+  "host_metadata_command": ["powershell", "-NoProfile", "-Command", "Get-ComputerInfo | ConvertTo-Json"]
+}

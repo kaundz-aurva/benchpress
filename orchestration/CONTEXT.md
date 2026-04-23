@@ -17,5 +17,4 @@ Design rules:
 - Catch lifecycle failures, persist `ErrorRecord`, and leave final run state observable.
 - Depend on adapter interfaces from `adapters/`, not concrete SQL Server, Windows, or HammerDB implementations.
 
-The current service supports a single-run lifecycle skeleton and delegates detailed behavior to private phase helpers.
-
+The current service supports real single-run lifecycle execution when supplied with agent-backed SQL Server/Windows adapters and a HammerDB runner. VM entrypoint wiring lives in `benchpress_orchestrator.py`.

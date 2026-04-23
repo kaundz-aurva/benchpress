@@ -10,6 +10,10 @@ Coverage currently includes:
 - Adapter constructor validation, happy paths, and explicit unsupported behavior.
 - Config validation and run-matrix generation.
 - Orchestration success and failure paths using fake adapters.
+- FastAPI SQL Server agent routes using `TestClient`.
+- Agent HTTP client and agent-backed adapters using HTTPX mock transports.
+- Client-VM orchestrator entrypoint using fake agent/workload implementations.
+- Asset generation for SQL Server audit, HammerDB TPROC-C, and Windows logman scripts.
 
 Rules:
 
@@ -19,5 +23,6 @@ Rules:
 
 Run tests with:
 
-- `python3 -m unittest discover -s tests`
+- `env/bin/python -m unittest discover -s tests`
 
+Do not add tests that require real SQL Server, real HammerDB, or real VM networking.

@@ -1,0 +1,81 @@
+{
+  "benchmark_profile": {
+    "name": "sqlserver-2019-audit-benchmark",
+    "database_engine": "sqlserver",
+    "database_version": "2019",
+    "cloud_provider": "gcp",
+    "description": "SQL Server audit overhead benchmark"
+  },
+  "target_host": {
+    "name": "sqlserver-vm",
+    "role": "target",
+    "os_type": "windows",
+    "hostname": "sqlserver.internal",
+    "vcpus": 4,
+    "memory_gb": 16
+  },
+  "client_host": {
+    "name": "hammerdb-client-vm",
+    "role": "client",
+    "os_type": "windows",
+    "hostname": "hammerdb-client.internal",
+    "vcpus": 2,
+    "memory_gb": 4
+  },
+  "agent": {
+    "base_url": "http://sqlserver.internal:8080",
+    "bearer_token_env": "BENCHPRESS_AGENT_TOKEN",
+    "timeout_seconds": 120
+  },
+  "workload": {
+    "tool": "hammerdb",
+    "hammerdb_executable_path": "C:/HammerDB/hammerdbcli.bat",
+    "hammerdb_script_path": "C:/benchpress/generated/hammerdb_tprocc_sqlserver.tcl",
+    "result_filename": "hammerdb_stdout.txt",
+    "virtual_user_ladder": [10, 20, 40, 60],
+    "timings": {
+      "warmup_minutes": 10,
+      "measured_minutes": 20,
+      "cooldown_minutes": 5
+    },
+    "repetitions": 3
+  },
+  "audit": {
+    "modes": ["audit_off", "audit_on"]
+  },
+  "storage": {
+    "sqlite_path": "benchpress.sqlite3",
+    "output_root": "outputs"
+  },
+  "assets": {
+    "sql_connection_name": "localhost",
+    "sqlcmd_path": "sqlcmd",
+    "staging_root": "C:/benchpress/agent_artifacts",
+    "command_timeout_seconds": 120,
+    "audit": {
+      "audit_name": "Audit-benchpress",
+      "server_audit_spec_name": "Server-Audit-Spec-benchpress",
+      "database_audit_spec_name_template": "Db-Audit-Spec-benchpress-{database}",
+      "audit_file_path": "D:\\rdsdbdata\\SQLAudit",
+      "max_size_mb": 10,
+      "queue_delay_ms": 1000,
+      "selected_databases": ["master", "new", "new_2"]
+    },
+    "hammerdb": {
+      "sql_server": "sqlserver.internal",
+      "sql_port": 1433,
+      "database_name": "tpcc",
+      "username_env": "BENCHPRESS_SQL_USER",
+      "password_env": "BENCHPRESS_SQL_PASSWORD",
+      "warehouses": 100,
+      "build_schema": false,
+      "driver_mode": "timed"
+    },
+    "metrics": {
+      "collector_name": "BenchpressSqlMetrics",
+      "sample_interval_seconds": 5,
+      "output_root": "C:/benchpress/agent_artifacts/metrics",
+      "max_size_mb": 1024
+    }
+  }
+}

@@ -1,91 +1,157 @@
 # Benchpress
 
-Benchpress is a Python benchmark orchestration framework for measuring the performance impact of database audit logging. The first target slice is SQL Server 2019 on Windows with HammerDB workloads, while the architecture is kept open for Postgres, Linux, SSH, pgbench, reporting, and a future SQLite-backed dashboard.
+Benchpress is a Python benchmark orchestration framework for measuring the performance impact of database audit logging. The current real-run target is SQL Server 2019 on Windows with HammerDB running from a separate client VM. The design keeps database, host, workload, transport, orchestration, and persistence concerns separated so later work can add Postgres, Linux, SSH, pgbench, reporting, and dashboarding.
+
+## Architecture
+
+```text
+Client VM
+  benchpress_orchestrator.py
+  HammerDB
+  SQLite results DB
+  raw output directory
+
+        HTTP + bearer token
+
+SQL Server VM
+  sqlserver_agent.py FastAPI service
+  sqlcmd audit/snapshot operations
+  Windows metrics commands
+  artifact staging directory
+```
+
+The orchestrator owns run state and SQLite persistence. The SQL Server agent exposes whitelisted actions only; it does not expose a generic shell endpoint.
 
 ## Features
 
-- Typed benchmark domain models for profiles, hosts, workloads, audit modes, runs, artifacts, summaries, and errors.
-- Structured config models that generate a run matrix across audit modes, virtual-user ladders, and repetitions.
-- SQLite persistence for benchmark metadata, run lifecycle state, artifacts, summaries, and failures.
-- Adapter interfaces for database, host, transport, and workload execution.
-- First-pass SQL Server, Windows host, and HammerDB adapter implementations.
-- Orchestration service that coordinates setup, precheck, metrics, snapshots, workload execution, artifact collection, summarization, and failure persistence.
-- Standard-library `unittest` coverage with fake adapters and temporary SQLite databases.
-
-## Requirements
-
-- Python 3.10 or newer.
-- No third-party Python packages are currently required.
-- Real benchmark execution will require external infrastructure and tooling, such as SQL Server, HammerDB, and a concrete transport adapter. Those are not installed by this repository.
+- JSON benchmark specs for real VM runs.
+- FastAPI SQL Server VM agent with bearer-token authentication.
+- Agent-backed `DatabaseAdapter` and `HostAdapter` implementations.
+- Local transport for running HammerDB on the client VM.
+- SQLite persistence for benchmark profiles, hosts, workloads, audit modes, runs, artifacts, summaries, and errors.
+- Run matrix generation across audit modes, VU ladder, and repetitions.
+- Raw artifact collection from both client-side HammerDB and SQL Server VM agent.
+- Deterministic generation of SQL Server audit SQL, HammerDB TPROC-C TCL, and Windows PerfMon/logman scripts from JSON.
 
 ## Installation
 
-Clone the repository, create a virtual environment, and install the requirements file:
+On both VMs:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
+python3 -m venv env
+source env/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-The current `requirements.txt` is intentionally empty apart from comments because the code uses only the Python standard library. It was checked against `pip freeze`; the only installed package in this environment was `wheel`, which is not required by Benchpress.
+On Windows PowerShell:
 
-## Usage
+```powershell
+py -3 -m venv env
+.\env\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
 
-Run the test suite:
+## Generate Benchmark Assets
+
+Edit `examples/benchmark_spec.example.json`, especially:
+
+- `assets.audit.audit_file_path`
+- `assets.audit.selected_databases`
+- `assets.hammerdb.sql_server`
+- `assets.hammerdb.database_name`
+- `assets.metrics.output_root`
+
+Generate SQL, TCL, PowerShell, and agent config files:
 
 ```bash
-python3 -m unittest discover -s tests
+python -m generate_benchmark_assets --spec examples/benchmark_spec.example.json --out generated
+```
+
+This writes:
+
+- `audit_enable.sql`
+- `audit_disable.sql`
+- `audit_snapshot_pre.sql`
+- `audit_snapshot_post.sql`
+- `audit_metadata.sql`
+- `hammerdb_tprocc_sqlserver.tcl`
+- `start_metrics.ps1`
+- `stop_metrics.ps1`
+- `sqlserver_agent.generated.json`
+
+Default audit object names are:
+
+- `Audit-benchpress`
+- `Server-Audit-Spec-benchpress`
+- `Db-Audit-Spec-benchpress-{database}`
+
+## SQL Server VM Setup
+
+Install SQL Server 2019 command-line access (`sqlcmd`). Copy the generated SQL and PowerShell files to the SQL Server VM at the paths referenced by `sqlserver_agent.generated.json`.
+
+```text
+generated/sqlserver_agent.generated.json
+```
+
+Set the bearer token:
+
+```powershell
+$env:BENCHPRESS_AGENT_TOKEN = "replace-with-a-long-random-token"
+```
+
+Start the SQL Server agent:
+
+```powershell
+python -m sqlserver_agent --config generated/sqlserver_agent.generated.json --host 0.0.0.0 --port 8080
+```
+
+Firewall the port so only the client VM can reach it.
+
+## Client VM Run
+
+Install HammerDB and copy the generated TCL script to the path configured by `workload.hammerdb_script_path`. Create or edit a benchmark spec based on:
+
+```text
+examples/benchmark_spec.example.json
+```
+
+Set the same bearer token:
+
+```bash
+export BENCHPRESS_AGENT_TOKEN="replace-with-a-long-random-token"
+```
+
+Run the benchmark:
+
+```bash
+python -m benchpress_orchestrator --spec examples/benchmark_spec.example.json
+```
+
+The orchestrator creates the SQLite DB configured by `storage.sqlite_path` and writes raw run artifacts under `storage.output_root`.
+
+## Development
+
+Run tests:
+
+```bash
+env/bin/python -m unittest discover -s tests
 ```
 
 Run a syntax check:
 
 ```bash
-python3 -m compileall config orchestration db adapters tests
+env/bin/python -m compileall agents adapters config orchestration db scripts tests benchpress_orchestrator.py sqlserver_agent.py generate_benchmark_assets.py
 ```
 
-Initialize a SQLite repository:
-
-```python
-from pathlib import Path
-
-from db.repository import BenchmarkRepository
-
-repo = BenchmarkRepository(Path("benchpress.sqlite3"))
-repo.create_schema()
-```
-
-Generate a benchmark run matrix:
-
-```python
-from pathlib import Path
-
-from config.models import BenchmarkConfig
-from config.service import BenchmarkConfigService
-from orchestration.models import AuditProfile, BenchmarkProfile, HostDefinition, HostRole
-
-config = BenchmarkConfig(
-    benchmark_profile=BenchmarkProfile(name="sqlserver-audit"),
-    target_host=HostDefinition("sql", HostRole.TARGET, "windows", "sql-host", 4, 16),
-    client_host=HostDefinition("client", HostRole.CLIENT, "windows", "client-host", 2, 4),
-    audit_profiles=(AuditProfile("off", "audit_off"), AuditProfile("on", "audit_on")),
-    output_root=Path("outputs"),
-)
-
-run_specs = BenchmarkConfigService().build_run_matrix(config)
-```
-
-To execute real runs, provide concrete adapters for database, host, transport, and workload behavior, then pass them into `BenchmarkOrchestrationService`. The current tests show fake adapter examples that do not require remote infrastructure.
+Tests use fakes, FastAPI `TestClient`, temp directories, and temp SQLite DBs. They do not require real SQL Server, HammerDB, Windows VMs, or network access.
 
 ## Project Layout
 
-- `config/`: benchmark configuration models and run-matrix generation.
-- `orchestration/`: domain models, DTOs, constants, and lifecycle service.
-- `db/`: SQLite schema creation and repository methods.
-- `adapters/`: extension seams plus SQL Server, Windows, and HammerDB scaffolding.
-- `tests/`: standard-library unit tests.
-
-## Development Notes
-
-Keep domain models infrastructure-neutral, keep SQL inside `db/`, and keep orchestration dependent on adapter interfaces rather than concrete infrastructure classes. Tests should stay isolated and must not require real cloud, database, Windows, HammerDB, or network resources.
-
+- `agents/`: FastAPI SQL Server VM agent and HTTP client.
+- `adapters/`: database, host, transport, and workload adapter seams plus concrete implementations.
+- `config/`: JSON runtime spec DTOs and run-matrix configuration.
+- `scripts/`: asset generation for SQL audit, HammerDB, and Windows metrics files.
+- `orchestration/`: domain models and benchmark lifecycle service.
+- `db/`: SQLite schema and repository.
+- `examples/`: real-run JSON spec templates.
+- `tests/`: isolated unit and integration-style tests.

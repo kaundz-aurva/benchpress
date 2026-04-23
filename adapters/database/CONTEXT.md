@@ -8,8 +8,9 @@ Key files:
 - `dto.py`: `SnapshotRequest`.
 - `constants.py`: database engine/version constants.
 - `sqlserver/`: first concrete SQL Server implementation.
+- `sqlserver_agent/`: SQL Server implementation that calls the FastAPI SQL Server VM agent.
 
-The database adapter seam exists so future work can add `PostgresDatabaseAdapter` without changing orchestration logic.
+The database adapter seam exists so future work can add `PostgresDatabaseAdapter` or a Postgres agent-backed adapter without changing orchestration logic.
 
 Required responsibilities:
 
@@ -20,4 +21,3 @@ Required responsibilities:
 - Database metadata collection.
 
 Do not place transport-specific command execution policies in orchestration.
-
