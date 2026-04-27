@@ -150,6 +150,30 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(result.metrics["latency_ms"], 12.5)
             self.assertNotIn("--vu", transport.commands[-1])
 
+    def test_hammerdb_runner_normalizes_windows_script_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transport = FakeTransport()
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdb",
+                transport=transport,
+                script_path=r"C:\benchpress\generated\hammerdb_tprocc_sqlserver.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            runner.execute_run(request)
+
+            self.assertIn(
+                '"C:/benchpress/generated/hammerdb_tprocc_sqlserver.tcl"',
+                transport.commands[-1],
+            )
+
     def test_hammerdb_runner_requires_transport_for_execution(self) -> None:
         runner = HammerDBWorkloadRunner(executable_path="hammerdb", script_path="run.tcl")
         request = WorkloadExecutionRequest(

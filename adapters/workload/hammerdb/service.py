@@ -41,7 +41,7 @@ class HammerDBWorkloadRunner(WorkloadRunner):
             raise NotImplementedError("HammerDB execution requires a transport adapter")
         if self.script_path is None:
             raise NotImplementedError("script_path is not configured")
-        command = f'"{self.executable_path}" auto "{self.script_path}"'
+        command = f'"{self.executable_path}" auto "{self._hammerdb_script_path()}"'
         result = self.transport.execute_command(
             RemoteCommandRequest(
                 host=request.client_host,
@@ -110,6 +110,11 @@ class HammerDBWorkloadRunner(WorkloadRunner):
         )
         stderr_output_path.write_text(stderr, encoding="utf-8")
         return stderr_output_path
+
+    def _hammerdb_script_path(self) -> str:
+        if self.script_path is None:
+            raise NotImplementedError("script_path is not configured")
+        return str(self.script_path).replace("\\", "/")
 
     def _validation_error(
         self,
