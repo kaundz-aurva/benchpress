@@ -118,6 +118,8 @@ examples/benchmark_spec.example.json
 
 Use the HammerDB CLI executable in `workload.hammerdb_executable_path`, typically `hammerdbcli.bat`. Do not point Benchpress at `hammerdb.exe`; the GUI entrypoint does not expose the `dbset`/`diset` automation commands required by the generated TCL.
 
+The generated SQL Server TCL targets HammerDB 5.0 dictionary keys. In particular it uses SQL authentication (`mssqls_authentication sql`), sets the database with `mssqls_dbase`, and configures timed runs with `mssqls_rampup` / `mssqls_duration` instead of the deprecated `runtimer` command.
+
 Set the same bearer token:
 
 ```bash
@@ -199,6 +201,7 @@ The HTML report includes inline SVG graphs for per-VU `audit_off` vs `audit_on` 
 Real VM notes:
 
 - The HammerDB runner now treats `Usage: hammerdb ...` output or missing `benchmark_status=completed` markers as run failures.
+- The HammerDB runner also fails the run when HammerDB reports virtual-user failures such as `FINISHED FAILED`, connection/login errors, or invalid SQL Server dictionary keys.
 - The generated metrics scripts are run-scoped and expect a `-RunId` argument from the generated agent config.
 - Host metrics appear in reports only when the SQL Server VM agent produces a `host_metrics_csv` artifact. BLG-only runs are treated as failed metrics captures and should be rerun after fixing collector/relog issues.
 

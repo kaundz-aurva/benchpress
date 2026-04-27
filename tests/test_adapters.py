@@ -294,6 +294,61 @@ class AdapterTests(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertIn("hammerdbcli.bat", result.error_message)
 
+    def test_hammerdb_runner_fails_when_virtual_users_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdbcli.exe",
+                transport=FakeTransport(
+                    stdout=(
+                        "virtual_users=2\n"
+                        "Vuser 1:FINISHED FAILED\n"
+                        "benchmark_status=completed\n"
+                    )
+                ),
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            result = runner.execute_run(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("finished failed", result.error_message.lower())
+
+    def test_hammerdb_runner_fails_on_sqlserver_login_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdbcli.exe",
+                transport=FakeTransport(
+                    stdout=(
+                        "Error in Virtual User 1: Connection to DRIVER=ODBC Driver 18 for SQL Server "
+                        "could not be established : [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]"
+                        "Login failed. The login is from an untrusted domain and cannot be used with Integrated authentication.\n"
+                        "benchmark_status=completed\n"
+                    )
+                ),
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            result = runner.execute_run(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("virtual users failed", result.error_message.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

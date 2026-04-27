@@ -13,6 +13,13 @@ from adapters.workload.service import WorkloadRunner
 class HammerDBWorkloadRunner(WorkloadRunner):
     COMPLETION_KEY = "benchmark_status"
     COMPLETION_VALUE = "completed"
+    FAILURE_MARKERS: tuple[str, ...] = (
+        "error in virtual user",
+        "finished failed",
+        "login failed",
+        "could not be established",
+        "cannot be found in any mssqlserver dictionary",
+    )
 
     def __init__(
         self,
@@ -139,6 +146,16 @@ class HammerDBWorkloadRunner(WorkloadRunner):
                 "HammerDB did not expose dbset/diset automation commands. "
                 "Use the HammerDB CLI entrypoint such as hammerdbcli.bat instead of hammerdb.exe."
             )
+        failure_marker = self._failure_marker(combined_output)
+        if failure_marker is not None:
+            detail = self._result_excerpt(stderr or stdout)
+            message = (
+                "HammerDB virtual users failed during execution "
+                f"({failure_marker})."
+            )
+            if detail:
+                return f"{message} Output: {detail}"
+            return message
         benchmark_status = str(metrics.get(self.COMPLETION_KEY, "")).strip().lower()
         if benchmark_status == self.COMPLETION_VALUE:
             return None
@@ -154,6 +171,12 @@ class HammerDBWorkloadRunner(WorkloadRunner):
     def _result_excerpt(self, value: str) -> str:
         compact = " ".join(value.split())
         return compact[:200]
+
+    def _failure_marker(self, combined_output: str) -> str | None:
+        for marker in self.FAILURE_MARKERS:
+            if marker in combined_output:
+                return marker
+        return None
 
     def _coerce_metric_value(self, value: str) -> Any:
         try:

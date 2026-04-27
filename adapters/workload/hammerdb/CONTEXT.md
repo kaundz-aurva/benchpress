@@ -9,7 +9,8 @@ Current behavior:
 - Builds a simple HammerDB auto-mode command without overriding virtual users on the CLI.
 - Writes raw stdout to the run output directory and optional stderr alongside it.
 - Parses simple `key=value` result lines into metrics.
-- Treats usage output or missing `benchmark_status=completed` markers as workload failures.
+- Treats usage output, virtual-user failures, SQL Server connection/login failures, or missing `benchmark_status=completed` markers as workload failures.
+- The generated SQL Server TCL is expected to target HammerDB 5.0 dictionary keys such as `mssqls_authentication`, `mssqls_dbase`, `mssqls_rampup`, and `mssqls_duration`.
 
 Future work:
 

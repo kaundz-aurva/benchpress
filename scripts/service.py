@@ -300,13 +300,17 @@ puts "cooldown_minutes=$cooldown_minutes"
 dbset db mssqls
 dbset bm TPC-C
 diset connection mssqls_server {_tcl_quote(spec.sql_server)}
+diset connection mssqls_tcp true
 diset connection mssqls_port {spec.sql_port}
+diset connection mssqls_authentication sql
 diset connection mssqls_uid $::env({spec.username_env})
 diset connection mssqls_pass $::env({spec.password_env})
-diset connection mssqls_database {_tcl_quote(spec.database_name)}
 diset tpcc mssqls_count_ware $warehouses
 diset tpcc mssqls_num_vu $virtual_users
+diset tpcc mssqls_dbase {_tcl_quote(spec.database_name)}
 diset tpcc mssqls_driver {_tcl_quote(spec.driver_mode)}
+diset tpcc mssqls_rampup $warmup_minutes
+diset tpcc mssqls_duration $measured_minutes
 
 if {{{str(spec.build_schema).lower()}}} {{
     buildschema
@@ -318,7 +322,6 @@ vuset vu $virtual_users
 vuset logtotemp 1
 vucreate
 vurun
-runtimer $measured_minutes
 vudestroy
 
 puts "duration_seconds=[expr {{$measured_minutes * 60}}]"
