@@ -25,9 +25,11 @@ class FakeTransport(TransportAdapter):
         self.stdout = stdout
         self.stderr = stderr
         self.commands: list[str] = []
+        self.environments: list[dict[str, str]] = []
 
     def execute_command(self, request: RemoteCommandRequest) -> RemoteCommandResult:
         self.commands.append(request.command)
+        self.environments.append(dict(request.environment))
         return RemoteCommandResult(
             command=request.command,
             exit_code=self.exit_code,
@@ -149,6 +151,42 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(result.metrics["tpm"], 100)
             self.assertEqual(result.metrics["latency_ms"], 12.5)
             self.assertNotIn("--vu", transport.commands[-1])
+            self.assertEqual(transport.environments[-1]["BENCHPRESS_VIRTUAL_USERS"], "10")
+
+    def test_hammerdb_runner_passes_run_specific_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transport = FakeTransport()
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdb",
+                transport=transport,
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile(
+                    "hammerdb_11vu",
+                    virtual_users=11,
+                    warmup_minutes=2,
+                    measured_minutes=3,
+                    cooldown_minutes=4,
+                ),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            runner.execute_run(request)
+
+            self.assertEqual(
+                transport.environments[-1],
+                {
+                    "BENCHPRESS_VIRTUAL_USERS": "11",
+                    "BENCHPRESS_WARMUP_MINUTES": "2",
+                    "BENCHPRESS_MEASURED_MINUTES": "3",
+                    "BENCHPRESS_COOLDOWN_MINUTES": "4",
+                },
+            )
 
     def test_hammerdb_runner_normalizes_windows_script_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

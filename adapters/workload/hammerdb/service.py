@@ -47,6 +47,7 @@ class HammerDBWorkloadRunner(WorkloadRunner):
                 host=request.client_host,
                 command=command,
                 timeout_seconds=self._timeout_seconds(request),
+                environment=self._environment(request),
             )
         )
         raw_output_path = request.output_dir / self.result_filename
@@ -101,6 +102,14 @@ class HammerDBWorkloadRunner(WorkloadRunner):
             + request.workload_profile.cooldown_minutes
         )
         return max(60, minutes * 60)
+
+    def _environment(self, request: WorkloadExecutionRequest) -> dict[str, str]:
+        return {
+            "BENCHPRESS_VIRTUAL_USERS": str(request.workload_profile.virtual_users),
+            "BENCHPRESS_WARMUP_MINUTES": str(request.workload_profile.warmup_minutes),
+            "BENCHPRESS_MEASURED_MINUTES": str(request.workload_profile.measured_minutes),
+            "BENCHPRESS_COOLDOWN_MINUTES": str(request.workload_profile.cooldown_minutes),
+        }
 
     def _stderr_output_path(self, raw_output_path: Path, stderr: str) -> Path | None:
         if not stderr.strip():

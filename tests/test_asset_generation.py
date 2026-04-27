@@ -80,6 +80,8 @@ class AssetGenerationTests(unittest.TestCase):
         self.assertIn("dbset db mssqls", tcl)
         self.assertIn("dbset bm TPC-C", tcl)
         self.assertIn("diset connection mssqls_server {sqlserver.internal}", tcl)
+        self.assertIn('benchpress_env "BENCHPRESS_VIRTUAL_USERS"', tcl)
+        self.assertNotIn("$::argv", tcl)
         self.assertIn("puts \"virtual_users=$virtual_users\"", tcl)
         self.assertIn("puts \"duration_seconds=", tcl)
         self.assertIn("puts \"benchmark_status=completed\"", tcl)
