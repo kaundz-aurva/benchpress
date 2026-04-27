@@ -128,7 +128,10 @@ class FakeAgentClient:
         return {"metrics": "started"}
 
     def stop_metrics_collection(self, run_id: int) -> list[ArtifactInfo]:
-        return [ArtifactInfo(artifact_id=3, artifact_type="host_metrics", path="metrics.txt")]
+        return [
+            ArtifactInfo(artifact_id=3, artifact_type="host_metrics", path="metrics.txt"),
+            ArtifactInfo(artifact_id=4, artifact_type="host_metrics_csv", path="metrics.csv"),
+        ]
 
     def collect_database_metadata(self) -> dict[str, object]:
         return {"engine": "sqlserver"}
@@ -166,4 +169,3 @@ class FakeWorkloadRunner(WorkloadRunner):
 
 if __name__ == "__main__":
     unittest.main()
-

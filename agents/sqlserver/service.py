@@ -92,7 +92,7 @@ class SqlServerAgentService:
     def start_metrics_collection(self, run_id: int) -> dict[str, str]:
         if not self.config.metrics_start_command:
             raise NotImplementedError("metrics_start_command is not configured")
-        self.host.start_metrics()
+        self.host.start_metrics(run_id)
         return {"metrics": "started", "run_id": str(run_id)}
 
     def stop_metrics_collection(self, run_id: int) -> list[AgentArtifact]:
@@ -241,19 +241,20 @@ class WindowsHostProvider:
         self.command_runner = command_runner
         self.artifacts = artifacts
 
-    def start_metrics(self) -> None:
+    def start_metrics(self, run_id: int) -> None:
         if self.config.metrics_start_command is None:
             raise NotImplementedError("metrics_start_command is not configured")
-        self._execute_command(self.config.metrics_start_command)
+        self._execute_command(self._resolve_command(self.config.metrics_start_command, run_id))
 
     def stop_metrics(self, run_id: int) -> list[AgentArtifact]:
         if self.config.metrics_stop_command is None:
             raise NotImplementedError("metrics_stop_command is not configured")
-        result = self._execute_command(self.config.metrics_stop_command)
+        command = self._resolve_command(self.config.metrics_stop_command, run_id)
+        result = self.command_runner(command, self.config.command_timeout_seconds)
         run_dir = self._run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = run_dir / "windows_metrics_stop.txt"
-        artifact_path.write_text(result.stdout, encoding="utf-8")
+        artifact_path.write_text(_command_output_text(result), encoding="utf-8")
         artifacts = [
             self.artifacts.register(
                 artifact_type="host_metrics",
@@ -262,6 +263,14 @@ class WindowsHostProvider:
             )
         ]
         artifacts.extend(self._artifacts_from_stdout(result.stdout))
+        if not result.succeeded:
+            artifacts.append(
+                self.artifacts.register(
+                    artifact_type="host_metrics_error",
+                    path=artifact_path,
+                    description="Windows metrics collection error output",
+                )
+            )
         return artifacts
 
     def collect_filesystem_stats(self) -> dict[str, object]:
@@ -294,13 +303,21 @@ class WindowsHostProvider:
     def _execute_command(self, command: Sequence[str]) -> LocalCommandResult:
         result = self.command_runner(command, self.config.command_timeout_seconds)
         if not result.succeeded:
-            raise AgentCommandError("host command failed")
+            raise AgentCommandError(_command_failure_message("host command failed", result))
         return result
 
     def _run_dir(self, run_id: int) -> Path:
         if run_id <= 0:
             raise ValueError("run_id must be positive")
         return self.config.staging_root / f"run_{run_id}"
+
+    def _resolve_command(self, command: Sequence[str], run_id: int) -> tuple[str, ...]:
+        replacements = {
+            "{run_id}": str(run_id),
+            "{run_dir}": str(self._run_dir(run_id)),
+            "{staging_root}": str(self.config.staging_root),
+        }
+        return tuple(_replace_command_tokens(arg, replacements) for arg in command)
 
     def _artifacts_from_stdout(self, stdout: str) -> list[AgentArtifact]:
         artifacts: list[AgentArtifact] = []
@@ -359,3 +376,32 @@ def _command_text(command: Sequence[str]) -> str:
 
 def _public_output(value: str) -> str:
     return value[:PUBLIC_OUTPUT_LIMIT]
+
+
+def _command_output_text(result: LocalCommandResult) -> str:
+    parts: list[str] = []
+    if result.stdout.strip():
+        parts.append(result.stdout.rstrip())
+    if result.stderr.strip():
+        parts.append("[stderr]")
+        parts.append(result.stderr.rstrip())
+    if not parts:
+        parts.append(f"exit_code={result.exit_code}")
+    return "\n".join(parts) + "\n"
+
+
+def _command_failure_message(prefix: str, result: LocalCommandResult) -> str:
+    detail = _public_output((result.stderr or result.stdout).strip())
+    if not detail:
+        if result.timed_out:
+            detail = "command timed out"
+        else:
+            detail = f"exit_code={result.exit_code}"
+    return f"{prefix}: {detail}"
+
+
+def _replace_command_tokens(value: str, replacements: dict[str, str]) -> str:
+    resolved = value
+    for token, replacement in replacements.items():
+        resolved = resolved.replace(token, replacement)
+    return resolved

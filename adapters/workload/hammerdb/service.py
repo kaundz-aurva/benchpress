@@ -11,6 +11,9 @@ from adapters.workload.service import WorkloadRunner
 
 
 class HammerDBWorkloadRunner(WorkloadRunner):
+    COMPLETION_KEY = "benchmark_status"
+    COMPLETION_VALUE = "completed"
+
     def __init__(
         self,
         executable_path: Path | str,
@@ -38,10 +41,7 @@ class HammerDBWorkloadRunner(WorkloadRunner):
             raise NotImplementedError("HammerDB execution requires a transport adapter")
         if self.script_path is None:
             raise NotImplementedError("script_path is not configured")
-        command = (
-            f'"{self.executable_path}" auto "{self.script_path}" '
-            f"--vu {request.workload_profile.virtual_users}"
-        )
+        command = f'"{self.executable_path}" auto "{self.script_path}"'
         result = self.transport.execute_command(
             RemoteCommandRequest(
                 host=request.client_host,
@@ -51,17 +51,30 @@ class HammerDBWorkloadRunner(WorkloadRunner):
         )
         raw_output_path = request.output_dir / self.result_filename
         raw_output_path.write_text(result.stdout, encoding="utf-8")
+        artifacts: list[Path] = [raw_output_path]
+        stderr_output_path = self._stderr_output_path(raw_output_path, result.stderr)
+        if stderr_output_path is not None:
+            artifacts.append(stderr_output_path)
         if not result.succeeded:
             return WorkloadExecutionResult(
                 success=False,
-                artifacts=(raw_output_path,),
+                artifacts=tuple(artifacts),
                 raw_output_path=raw_output_path,
                 error_message=result.stderr or result.stdout or "HammerDB execution failed",
             )
+        metrics = self.parse_results(raw_output_path)
+        validation_error = self._validation_error(result.stdout, result.stderr, metrics)
+        if validation_error is not None:
+            return WorkloadExecutionResult(
+                success=False,
+                artifacts=tuple(artifacts),
+                raw_output_path=raw_output_path,
+                error_message=validation_error,
+            )
         return WorkloadExecutionResult(
             success=True,
-            artifacts=(raw_output_path,),
-            metrics=self.parse_results(raw_output_path),
+            artifacts=tuple(artifacts),
+            metrics=metrics,
             raw_output_path=raw_output_path,
         )
 
@@ -89,6 +102,40 @@ class HammerDBWorkloadRunner(WorkloadRunner):
         )
         return max(60, minutes * 60)
 
+    def _stderr_output_path(self, raw_output_path: Path, stderr: str) -> Path | None:
+        if not stderr.strip():
+            return None
+        stderr_output_path = raw_output_path.with_name(
+            raw_output_path.stem + "_stderr" + raw_output_path.suffix
+        )
+        stderr_output_path.write_text(stderr, encoding="utf-8")
+        return stderr_output_path
+
+    def _validation_error(
+        self,
+        stdout: str,
+        stderr: str,
+        metrics: dict[str, Any],
+    ) -> str | None:
+        combined_output = "\n".join(part for part in (stdout, stderr) if part).lower()
+        if "usage: hammerdb" in combined_output:
+            return "HammerDB returned usage output; check the executable path and auto-mode invocation."
+        benchmark_status = str(metrics.get(self.COMPLETION_KEY, "")).strip().lower()
+        if benchmark_status == self.COMPLETION_VALUE:
+            return None
+        detail = self._result_excerpt(stderr or stdout)
+        message = (
+            "HammerDB run did not report "
+            f"{self.COMPLETION_KEY}={self.COMPLETION_VALUE}."
+        )
+        if detail:
+            return f"{message} Output: {detail}"
+        return message
+
+    def _result_excerpt(self, value: str) -> str:
+        compact = " ".join(value.split())
+        return compact[:200]
+
     def _coerce_metric_value(self, value: str) -> Any:
         try:
             return int(value)
@@ -97,4 +144,3 @@ class HammerDBWorkloadRunner(WorkloadRunner):
                 return float(value)
             except ValueError:
                 return value
-

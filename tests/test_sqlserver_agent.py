@@ -41,6 +41,17 @@ class SqlServerAgentAppTests(unittest.TestCase):
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.content, b"snapshot output")
 
+    def test_metrics_commands_substitute_run_id(self) -> None:
+        client = TestClient(create_app(self._service(), bearer_token="secret"))
+
+        start_response = client.post("/metrics/start", json={"run_id": 7}, headers=self._auth())
+        stop_response = client.post("/metrics/stop", json={"run_id": 7}, headers=self._auth())
+
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(stop_response.status_code, 200)
+        self.assertIn(("powershell", "start", "7"), self.commands)
+        self.assertIn(("powershell", "stop", "7"), self.commands)
+
     def test_agent_errors_are_sanitized(self) -> None:
         def failing_runner(command: Sequence[str], timeout: int) -> LocalCommandResult:
             return LocalCommandResult(
@@ -78,8 +89,8 @@ class SqlServerAgentAppTests(unittest.TestCase):
             staging_root=Path(self.temp_dir.name),
             enable_audit_sql="ENABLE AUDIT",
             disable_audit_sql="DISABLE AUDIT",
-            metrics_start_command=("powershell", "start"),
-            metrics_stop_command=("powershell", "stop"),
+            metrics_start_command=("powershell", "start", "{run_id}"),
+            metrics_stop_command=("powershell", "stop", "{run_id}"),
         )
 
     def _runner(self, command: Sequence[str], timeout: int) -> LocalCommandResult:
@@ -95,4 +106,3 @@ class SqlServerAgentAppTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

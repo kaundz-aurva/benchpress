@@ -194,6 +194,12 @@ python -m generate_benchmark_report --db benchpress.sqlite3 --out reports/summar
 
 The HTML report includes inline SVG graphs for per-VU `audit_off` vs `audit_on` CPU/memory averages and per-run time-series charts when Windows PerfMon CSV artifacts are available. Host metrics are parsed from `host_metrics_csv` artifacts produced by the generated stop-metrics script. Failed, skipped, and incomplete runs are shown in diagnostics but excluded from aggregate and audit overhead calculations. For TPM/NOPM, a negative percent change means `audit_on` throughput was lower than `audit_off`.
 
+Real VM notes:
+
+- The HammerDB runner now treats `Usage: hammerdb ...` output or missing `benchmark_status=completed` markers as run failures.
+- The generated metrics scripts are run-scoped and expect a `-RunId` argument from the generated agent config.
+- Host metrics appear in reports only when the SQL Server VM agent produces a `host_metrics_csv` artifact. BLG-only runs are treated as failed metrics captures and should be rerun after fixing collector/relog issues.
+
 ## Development
 
 Run tests:

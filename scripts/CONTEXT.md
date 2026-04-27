@@ -10,3 +10,9 @@ Generated assets:
 - SQL Server agent JSON config pointing at generated files.
 
 Keep generated script logic here. Runtime orchestration should consume generated files through existing agent and workload configuration instead of embedding script text.
+
+Current script behavior:
+
+- The generated metrics scripts are run-scoped and accept `-RunId`.
+- Logman output is written under a per-run metrics subdirectory to avoid stale BLG reuse.
+- The stop script emits both BLG and CSV artifact markers when conversion succeeds and throws on `relog` failures instead of failing silently.

@@ -90,10 +90,15 @@ class AssetGenerationTests(unittest.TestCase):
         start_script = (output_dir / METRICS_START_FILENAME).read_text(encoding="utf-8")
         stop_script = (output_dir / METRICS_STOP_FILENAME).read_text(encoding="utf-8")
 
+        self.assertIn("param(", start_script)
+        self.assertIn("$RunRoot", start_script)
         self.assertIn("logman create counter", start_script)
         self.assertIn("logman start $CollectorName", start_script)
         self.assertIn("\\Processor(_Total)\\% Processor Time", start_script)
+        self.assertIn("Invoke-BenchpressNative", start_script)
         self.assertIn("logman stop $CollectorName", stop_script)
+        self.assertIn("host_metrics_csv", stop_script)
+        self.assertIn("relog $($LatestBlg.FullName)", stop_script)
         self.assertIn("BENCHPRESS_ARTIFACT=", stop_script)
 
     def test_generated_agent_config_points_to_generated_files(self) -> None:
@@ -103,8 +108,10 @@ class AssetGenerationTests(unittest.TestCase):
 
         self.assertEqual(config["enable_audit_sql_file"], str(output_dir / AUDIT_ENABLE_FILENAME))
         self.assertEqual(config["disable_audit_sql_file"], str(output_dir / AUDIT_DISABLE_FILENAME))
-        self.assertEqual(config["metrics_start_command"][-1], str(output_dir / METRICS_START_FILENAME))
-        self.assertEqual(config["metrics_stop_command"][-1], str(output_dir / METRICS_STOP_FILENAME))
+        self.assertEqual(config["metrics_start_command"][-3], str(output_dir / METRICS_START_FILENAME))
+        self.assertEqual(config["metrics_stop_command"][-3], str(output_dir / METRICS_STOP_FILENAME))
+        self.assertEqual(config["metrics_start_command"][-2:], ["-RunId", "{run_id}"])
+        self.assertEqual(config["metrics_stop_command"][-2:], ["-RunId", "{run_id}"])
 
     def test_invalid_asset_config_fails_validation(self) -> None:
         spec = self._spec()
@@ -186,4 +193,3 @@ class AssetGenerationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

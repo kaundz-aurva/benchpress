@@ -17,3 +17,5 @@ Security rules:
 - Prefer generated SQL files through `*_sql_file` config fields for multi-batch scripts with `GO`.
 - Return sanitized command failures to clients.
 - Stream artifact downloads to disk from the client side.
+- Metrics start/stop commands may include `{run_id}`, `{run_dir}`, and `{staging_root}` placeholders that are resolved per run before execution.
+- Stop-metrics output is always written to `windows_metrics_stop.txt` under the run staging directory for debugging, even when the metrics command itself fails.

@@ -15,9 +15,15 @@ from orchestration.models import AuditProfile, HostDefinition, HostRole, Workloa
 
 
 class FakeTransport(TransportAdapter):
-    def __init__(self, exit_code: int = 0, stdout: str = "tpm=100\nlatency_ms=12.5") -> None:
+    def __init__(
+        self,
+        exit_code: int = 0,
+        stdout: str = "tpm=100\nlatency_ms=12.5\nbenchmark_status=completed",
+        stderr: str = "",
+    ) -> None:
         self.exit_code = exit_code
         self.stdout = stdout
+        self.stderr = stderr
         self.commands: list[str] = []
 
     def execute_command(self, request: RemoteCommandRequest) -> RemoteCommandResult:
@@ -26,7 +32,7 @@ class FakeTransport(TransportAdapter):
             command=request.command,
             exit_code=self.exit_code,
             stdout=self.stdout,
-            stderr="" if self.exit_code == 0 else "failed",
+            stderr=self.stderr or ("" if self.exit_code == 0 else "failed"),
         )
 
     def upload_file(self, local_path: Path, remote_path: Path) -> None:
@@ -121,9 +127,10 @@ class AdapterTests(unittest.TestCase):
 
     def test_hammerdb_runner_executes_and_parses_results(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            transport = FakeTransport()
             runner = HammerDBWorkloadRunner(
                 executable_path="hammerdb",
-                transport=FakeTransport(),
+                transport=transport,
                 script_path="run.tcl",
             )
             request = WorkloadExecutionRequest(
@@ -141,6 +148,7 @@ class AdapterTests(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertEqual(result.metrics["tpm"], 100)
             self.assertEqual(result.metrics["latency_ms"], 12.5)
+            self.assertNotIn("--vu", transport.commands[-1])
 
     def test_hammerdb_runner_requires_transport_for_execution(self) -> None:
         runner = HammerDBWorkloadRunner(executable_path="hammerdb", script_path="run.tcl")
@@ -160,6 +168,48 @@ class AdapterTests(unittest.TestCase):
         runner = HammerDBWorkloadRunner(executable_path="hammerdb")
         with self.assertRaises(FileNotFoundError):
             runner.parse_results(Path("missing.txt"))
+
+    def test_hammerdb_runner_fails_on_usage_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdb",
+                transport=FakeTransport(stdout="Usage: hammerdb [ auto [ script_to_autoload.tcl ] ]"),
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            result = runner.execute_run(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("usage output", result.error_message.lower())
+
+    def test_hammerdb_runner_requires_completion_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdb",
+                transport=FakeTransport(stdout="tpm=100\nlatency_ms=12.5"),
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            result = runner.execute_run(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("benchmark_status=completed", result.error_message)
 
 
 if __name__ == "__main__":

@@ -331,47 +331,101 @@ exit
 class WindowsLogmanMetricsScriptGenerator:
     def render_start(self, spec: WindowsMetricsScriptSpecDto) -> str:
         counters = "\n".join(f'    "{counter}"' for counter in spec.counters)
-        return f"""$ErrorActionPreference = "Stop"
-$CollectorName = "{_powershell_escape(spec.collector_name)}"
-$OutputRoot = "{_powershell_escape(str(spec.output_root))}"
-$CountersPath = Join-Path $OutputRoot "benchpress_counters.txt"
+        return f"""param(
+    [int]$RunId = 0
+)
 
-New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+$ErrorActionPreference = "Stop"
+$BaseCollectorName = "{_powershell_escape(spec.collector_name)}"
+$CollectorName = if ($RunId -gt 0) {{ "$BaseCollectorName-$RunId" }} else {{ $BaseCollectorName }}
+$OutputRoot = "{_powershell_escape(str(spec.output_root))}"
+$RunRoot = if ($RunId -gt 0) {{ Join-Path $OutputRoot ("run_" + $RunId) }} else {{ Join-Path $OutputRoot "shared" }}
+$CountersPath = Join-Path $RunRoot "benchpress_counters.txt"
+
+function Invoke-BenchpressNative {{
+    param(
+        [string]$Description,
+        [scriptblock]$Command
+    )
+
+    $output = & $Command 2>&1
+    if ($LASTEXITCODE -ne 0) {{
+        $detail = ($output | Out-String).Trim()
+        if (-not $detail) {{
+            $detail = "$Description failed with exit code $LASTEXITCODE"
+        }}
+        throw $detail
+    }}
+}}
+
+New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
+Get-ChildItem -Path $RunRoot -Filter "benchpress_metrics*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 @(
 {counters}
 ) | Set-Content -Encoding ASCII -Path $CountersPath
 
 $existing = logman query $CollectorName 2>$null
 if ($LASTEXITCODE -eq 0) {{
-    logman stop $CollectorName 2>$null | Out-Null
-    logman delete $CollectorName | Out-Null
+    Invoke-BenchpressNative "logman stop $CollectorName" {{ logman stop $CollectorName }}
+    Invoke-BenchpressNative "logman delete $CollectorName" {{ logman delete $CollectorName }}
 }}
 
-logman create counter $CollectorName -cf $CountersPath -si {spec.sample_interval_seconds} -f bincirc -max {spec.max_size_mb} -o (Join-Path $OutputRoot "benchpress_metrics") | Out-Null
-logman start $CollectorName | Out-Null
+Invoke-BenchpressNative "logman create counter $CollectorName" {{ logman create counter $CollectorName -cf $CountersPath -si {spec.sample_interval_seconds} -f bincirc -max {spec.max_size_mb} -o (Join-Path $RunRoot "benchpress_metrics") }}
+Invoke-BenchpressNative "logman start $CollectorName" {{ logman start $CollectorName }}
 Write-Output "metrics_started=$CollectorName"
+Write-Output "metrics_run_root=$RunRoot"
 """
 
     def render_stop(self, spec: WindowsMetricsScriptSpecDto) -> str:
-        return f"""$ErrorActionPreference = "Stop"
-$CollectorName = "{_powershell_escape(spec.collector_name)}"
+        return f"""param(
+    [int]$RunId = 0
+)
+
+$ErrorActionPreference = "Stop"
+$BaseCollectorName = "{_powershell_escape(spec.collector_name)}"
+$CollectorName = if ($RunId -gt 0) {{ "$BaseCollectorName-$RunId" }} else {{ $BaseCollectorName }}
 $OutputRoot = "{_powershell_escape(str(spec.output_root))}"
+$RunRoot = if ($RunId -gt 0) {{ Join-Path $OutputRoot ("run_" + $RunId) }} else {{ Join-Path $OutputRoot "shared" }}
+
+function Invoke-BenchpressNative {{
+    param(
+        [string]$Description,
+        [scriptblock]$Command
+    )
+
+    $output = & $Command 2>&1
+    if ($LASTEXITCODE -ne 0) {{
+        $detail = ($output | Out-String).Trim()
+        if (-not $detail) {{
+            $detail = "$Description failed with exit code $LASTEXITCODE"
+        }}
+        throw $detail
+    }}
+}}
 
 $existing = logman query $CollectorName 2>$null
 if ($LASTEXITCODE -eq 0) {{
-    logman stop $CollectorName | Out-Null
+    Invoke-BenchpressNative "logman stop $CollectorName" {{ logman stop $CollectorName }}
 }}
 
-$LatestBlg = Get-ChildItem -Path $OutputRoot -Filter "*.blg" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$LatestBlg = Get-ChildItem -Path $RunRoot -Filter "*.blg" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($LatestBlg -ne $null) {{
     Write-Output "BENCHPRESS_ARTIFACT=$($LatestBlg.FullName)|host_metrics_blg|Windows PerfMon BLG metrics"
     $CsvPath = [System.IO.Path]::ChangeExtension($LatestBlg.FullName, ".csv")
-    relog $LatestBlg.FullName -f CSV -o $CsvPath 2>$null | Out-Null
+    if (Test-Path $CsvPath) {{
+        Remove-Item -Force $CsvPath
+    }}
+    Invoke-BenchpressNative "relog $($LatestBlg.FullName)" {{ relog $LatestBlg.FullName -f CSV -o $CsvPath }}
     if (Test-Path $CsvPath) {{
         Write-Output "BENCHPRESS_ARTIFACT=$CsvPath|host_metrics_csv|Windows PerfMon CSV metrics"
+    }} else {{
+        throw "PerfMon CSV was not created: $CsvPath"
     }}
+}} else {{
+    throw "No BLG metrics artifact found in $RunRoot"
 }}
 Write-Output "metrics_stopped=$CollectorName"
+Write-Output "metrics_run_root=$RunRoot"
 """
 
 
@@ -395,6 +449,8 @@ def _agent_config(spec: AssetGenerationSpecDto, assets: GeneratedBenchmarkAssets
             "Bypass",
             "-File",
             str(assets.metrics_start_ps1),
+            "-RunId",
+            "{run_id}",
         ],
         "metrics_stop_command": [
             "powershell",
@@ -403,6 +459,8 @@ def _agent_config(spec: AssetGenerationSpecDto, assets: GeneratedBenchmarkAssets
             "Bypass",
             "-File",
             str(assets.metrics_stop_ps1),
+            "-RunId",
+            "{run_id}",
         ],
         "filesystem_stats_command": [
             "powershell",
@@ -433,4 +491,3 @@ def _tcl_quote(value: str) -> str:
 
 def _powershell_escape(value: str) -> str:
     return value.replace("`", "``").replace('"', '`"')
-

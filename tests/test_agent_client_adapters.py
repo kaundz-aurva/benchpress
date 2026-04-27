@@ -51,10 +51,23 @@ class AgentClientAdapterTests(unittest.TestCase):
         adapter.start_metrics_collection(1, Path(self.temp_dir.name))
         artifacts = adapter.stop_metrics_collection(1, Path(self.temp_dir.name))
 
-        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(len(artifacts), 2)
         self.assertEqual(artifacts[0].path.read_text(encoding="utf-8"), "metrics")
         self.assertEqual(adapter.collect_host_metadata()["os"], "windows")
         self.assertEqual(adapter.collect_filesystem_stats()["free_bytes"], 100)
+
+    def test_host_adapter_raises_when_csv_artifact_is_missing(self) -> None:
+        client = SqlServerAgentClient(
+            base_url="http://agent",
+            bearer_token="secret",
+            transport=httpx.MockTransport(self._handler_without_csv),
+        )
+        adapter = WindowsAgentHostAdapter(client)
+
+        with self.assertRaises(RuntimeError):
+            adapter.stop_metrics_collection(1, Path(self.temp_dir.name))
+
+        client.close()
 
     def test_client_raises_on_agent_error(self) -> None:
         client = SqlServerAgentClient(
@@ -96,6 +109,11 @@ class AgentClientAdapterTests(unittest.TestCase):
                             "artifact_id": 2,
                             "artifact_type": "host_metrics",
                             "path": "windows_metrics_stop.txt",
+                        },
+                        {
+                            "artifact_id": 3,
+                            "artifact_type": "host_metrics_csv",
+                            "path": "metrics.csv",
                         }
                     ]
                 }
@@ -116,7 +134,30 @@ class AgentClientAdapterTests(unittest.TestCase):
             return httpx.Response(200, content=b"snapshot")
         if path == "/artifacts/2":
             return httpx.Response(200, content=b"metrics")
+        if path == "/artifacts/3":
+            return httpx.Response(200, content=b"(PDH-CSV 4.0)\n")
         return httpx.Response(404, json={"detail": f"unknown path {path}"})
+
+    def _handler_without_csv(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/metrics/stop":
+            return self._json(
+                {
+                    "artifacts": [
+                        {
+                            "artifact_id": 2,
+                            "artifact_type": "host_metrics",
+                            "path": "windows_metrics_stop.txt",
+                        }
+                    ]
+                }
+            )
+        if path == "/artifacts/2":
+            return httpx.Response(
+                200,
+                content=b"BENCHPRESS_ARTIFACT=C:/metrics.blg|host_metrics_blg|Windows PerfMon BLG metrics",
+            )
+        return self._handler(request)
 
     def _json(self, data: dict[str, object]) -> httpx.Response:
         return httpx.Response(200, content=json.dumps(data).encode("utf-8"))
@@ -124,4 +165,3 @@ class AgentClientAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

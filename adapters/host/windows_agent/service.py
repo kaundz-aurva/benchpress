@@ -18,7 +18,10 @@ class WindowsAgentHostAdapter(HostAdapter):
 
     def stop_metrics_collection(self, run_id: int, output_dir: Path) -> list[RunArtifact]:
         artifacts = self.client.stop_metrics_collection(run_id)
-        return [self._download_artifact(run_id, artifact, output_dir) for artifact in artifacts]
+        downloaded = [self._download_artifact(run_id, artifact, output_dir) for artifact in artifacts]
+        if any(artifact.artifact_type == "host_metrics_csv" for artifact in downloaded):
+            return downloaded
+        raise RuntimeError("Metrics stop did not produce a host_metrics_csv artifact.")
 
     def collect_filesystem_stats(self) -> dict[str, Any]:
         return self.client.collect_filesystem_stats()
@@ -39,4 +42,3 @@ class WindowsAgentHostAdapter(HostAdapter):
             path=local_path,
             description=artifact.description,
         )
-

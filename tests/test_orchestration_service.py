@@ -76,16 +76,26 @@ class FakeHostAdapter(HostAdapter):
 
 
 class FakeWorkloadRunner(WorkloadRunner):
+    def __init__(self, success: bool = True) -> None:
+        self.success = success
+
     def prepare_run(self, request: WorkloadExecutionRequest) -> None:
         return None
 
     def execute_run(self, request: WorkloadExecutionRequest) -> WorkloadExecutionResult:
         path = request.output_dir / "workload.txt"
         path.write_text("workload", encoding="utf-8")
+        if not self.success:
+            return WorkloadExecutionResult(
+                success=False,
+                artifacts=(path,),
+                raw_output_path=path,
+                error_message="HammerDB run did not report benchmark_status=completed.",
+            )
         return WorkloadExecutionResult(
             success=True,
             artifacts=(path,),
-            metrics={"tpm": 100},
+            metrics={"tpm": 100, "benchmark_status": "completed"},
             raw_output_path=path,
         )
 
@@ -165,7 +175,22 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0].exception_type, "RuntimeError")
 
+    def test_workload_failure_marks_run_failed(self) -> None:
+        service = BenchmarkOrchestrationService(
+            repository=self.repo,
+            database_adapter=FakeDatabaseAdapter(),
+            target_host_adapter=FakeHostAdapter(),
+            workload_runner=FakeWorkloadRunner(success=False),
+        )
+        spec = service.build_run_matrix(self._spec())[0]
+
+        run = service.execute_single_run(spec)
+        errors = self.repo.list_errors(run.run_id or 0)
+
+        self.assertEqual(run.status, RunStatus.FAILED)
+        self.assertEqual(run.phase, RunPhase.WORKLOAD_RUN)
+        self.assertEqual(errors[0].message, "HammerDB run did not report benchmark_status=completed.")
+
 
 if __name__ == "__main__":
     unittest.main()
-
