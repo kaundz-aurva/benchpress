@@ -273,6 +273,27 @@ class AdapterTests(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertIn("benchmark_status=completed", result.error_message)
 
+    def test_hammerdb_runner_explains_dbset_command_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = HammerDBWorkloadRunner(
+                executable_path="hammerdb.exe",
+                transport=FakeTransport(stdout='Error in Virtual User 1: Error: invalid command name "dbset"'),
+                script_path="run.tcl",
+            )
+            request = WorkloadExecutionRequest(
+                run_id=1,
+                workload_profile=WorkloadProfile("hammerdb_10vu"),
+                target_host=self.target,
+                client_host=self.client,
+                audit_profile=AuditProfile("audit_off", "audit_off"),
+                output_dir=Path(temp_dir),
+            )
+
+            result = runner.execute_run(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("hammerdbcli.bat", result.error_message)
+
 
 if __name__ == "__main__":
     unittest.main()

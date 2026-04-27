@@ -134,6 +134,11 @@ class HammerDBWorkloadRunner(WorkloadRunner):
         combined_output = "\n".join(part for part in (stdout, stderr) if part).lower()
         if "usage: hammerdb" in combined_output:
             return "HammerDB returned usage output; check the executable path and auto-mode invocation."
+        if 'invalid command name "dbset"' in combined_output or 'invalid command name "diset"' in combined_output:
+            return (
+                "HammerDB did not expose dbset/diset automation commands. "
+                "Use the HammerDB CLI entrypoint such as hammerdbcli.bat instead of hammerdb.exe."
+            )
         benchmark_status = str(metrics.get(self.COMPLETION_KEY, "")).strip().lower()
         if benchmark_status == self.COMPLETION_VALUE:
             return None

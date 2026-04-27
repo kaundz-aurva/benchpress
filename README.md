@@ -116,6 +116,8 @@ Install HammerDB and copy the generated TCL script to the path configured by `wo
 examples/benchmark_spec.example.json
 ```
 
+Use the HammerDB CLI executable in `workload.hammerdb_executable_path`, typically `hammerdbcli.bat`. Do not point Benchpress at `hammerdb.exe`; the GUI entrypoint does not expose the `dbset`/`diset` automation commands required by the generated TCL.
+
 Set the same bearer token:
 
 ```bash

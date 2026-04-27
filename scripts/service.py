@@ -357,6 +357,25 @@ function Invoke-BenchpressNative {{
     }}
 }}
 
+function Stop-BenchpressCollectorIfPresent {{
+    param(
+        [string]$CollectorName
+    )
+
+    $output = logman stop $CollectorName 2>&1
+    if ($LASTEXITCODE -eq 0) {{
+        return
+    }}
+    $detail = ($output | Out-String).Trim()
+    if ($detail -match "Data Collector Set is not running") {{
+        return
+    }}
+    if (-not $detail) {{
+        $detail = "logman stop $CollectorName failed with exit code $LASTEXITCODE"
+    }}
+    throw $detail
+}}
+
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 Get-ChildItem -Path $RunRoot -Filter "benchpress_metrics*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 @(
@@ -365,7 +384,7 @@ Get-ChildItem -Path $RunRoot -Filter "benchpress_metrics*" -ErrorAction Silently
 
 $existing = logman query $CollectorName 2>$null
 if ($LASTEXITCODE -eq 0) {{
-    Invoke-BenchpressNative "logman stop $CollectorName" {{ logman stop $CollectorName }}
+    Stop-BenchpressCollectorIfPresent $CollectorName
     Invoke-BenchpressNative "logman delete $CollectorName" {{ logman delete $CollectorName }}
 }}
 
@@ -402,9 +421,28 @@ function Invoke-BenchpressNative {{
     }}
 }}
 
+function Stop-BenchpressCollectorIfPresent {{
+    param(
+        [string]$CollectorName
+    )
+
+    $output = logman stop $CollectorName 2>&1
+    if ($LASTEXITCODE -eq 0) {{
+        return
+    }}
+    $detail = ($output | Out-String).Trim()
+    if ($detail -match "Data Collector Set is not running") {{
+        return
+    }}
+    if (-not $detail) {{
+        $detail = "logman stop $CollectorName failed with exit code $LASTEXITCODE"
+    }}
+    throw $detail
+}}
+
 $existing = logman query $CollectorName 2>$null
 if ($LASTEXITCODE -eq 0) {{
-    Invoke-BenchpressNative "logman stop $CollectorName" {{ logman stop $CollectorName }}
+    Stop-BenchpressCollectorIfPresent $CollectorName
 }}
 
 $LatestBlg = Get-ChildItem -Path $RunRoot -Filter "*.blg" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
