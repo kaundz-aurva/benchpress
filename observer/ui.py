@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
-from pathlib import Path
-from typing import Iterable
 
 from rich.console import Group
 from rich.panel import Panel
@@ -17,7 +16,7 @@ from textual.widgets import Input, Static
 
 from observer.commands import CommandParseError, ObserverCommand, parse_command
 from observer.dto import ObserverSessionConfig
-from observer.models import ArtifactPreview, ObserverRunState, ObserverSnapshot
+from observer.models import ObserverRunState, ObserverSnapshot, TextPreview
 from observer.service import ObserverService
 
 
@@ -81,9 +80,12 @@ class BenchpressObserverApp(App[None]):
         self.service = ObserverService()
         self.snapshot: ObserverSnapshot | None = None
         self.view_mode = "dashboard"
+        self.detail_mode = "general"
+        self.detail_return_view = "runs"
         self.return_view = "dashboard"
         self.selected_run_id: int | None = None
         self.selected_artifact_index = 0
+        self.text_preview: TextPreview | None = None
         self.status_message = "Loading observer state..."
         self.refresh_timer: Timer | None = None
 
@@ -94,7 +96,10 @@ class BenchpressObserverApp(App[None]):
         yield Static("", id="statusbar")
         with Horizontal(id="command-bar", classes="hidden"):
             yield Static(":", id="command-prefix")
-            yield Input(placeholder="q | runs | dashboard | open 12 | refresh 5", id="command-input")
+            yield Input(
+                placeholder="q | dashboard | runs | failures | open 12 | refresh 5",
+                id="command-input",
+            )
 
     def on_mount(self) -> None:
         self._refresh_snapshot("Observer attached")
@@ -107,7 +112,7 @@ class BenchpressObserverApp(App[None]):
                 event.stop()
             return
 
-        character = event.character or ""
+        character = (event.character or "").lower()
         if character == ":":
             self._open_command()
             event.stop()
@@ -120,8 +125,20 @@ class BenchpressObserverApp(App[None]):
             self._refresh_snapshot("Manual refresh")
             event.stop()
             return
+        if self.view_mode == "detail" and character == "e":
+            if self._open_latest_error_preview():
+                event.stop()
+                return
+        if self.view_mode == "detail" and character == "s":
+            if self._open_failure_summary_preview():
+                event.stop()
+                return
         if event.key == "up":
-            if self.view_mode == "runs":
+            if self.view_mode == "text":
+                self._content_scroll().scroll_up(animate=False, immediate=True)
+                event.stop()
+                return
+            if self.view_mode in {"runs", "failures"}:
                 self._move_run_selection(-1)
                 event.stop()
                 return
@@ -130,7 +147,11 @@ class BenchpressObserverApp(App[None]):
                 event.stop()
                 return
         if event.key == "down":
-            if self.view_mode == "runs":
+            if self.view_mode == "text":
+                self._content_scroll().scroll_down(animate=False, immediate=True)
+                event.stop()
+                return
+            if self.view_mode in {"runs", "failures"}:
                 self._move_run_selection(1)
                 event.stop()
                 return
@@ -138,11 +159,39 @@ class BenchpressObserverApp(App[None]):
                 self._move_artifact_selection(1)
                 event.stop()
                 return
+        if self.view_mode == "text" and event.key == "left":
+            self._content_scroll().scroll_left(animate=False, immediate=True)
+            event.stop()
+            return
+        if self.view_mode == "text" and event.key == "right":
+            self._content_scroll().scroll_right(animate=False, immediate=True)
+            event.stop()
+            return
+        if self.view_mode == "text" and event.key == "pageup":
+            self._content_scroll().scroll_page_up(animate=False)
+            event.stop()
+            return
+        if self.view_mode == "text" and event.key == "pagedown":
+            self._content_scroll().scroll_page_down(animate=False)
+            event.stop()
+            return
+        if self.view_mode == "text" and event.key == "home":
+            self._content_scroll().scroll_home(animate=False, immediate=True)
+            event.stop()
+            return
+        if self.view_mode == "text" and event.key == "end":
+            self._content_scroll().scroll_end(animate=False, immediate=True)
+            event.stop()
+            return
         if event.key == "enter":
             if self._enter_current_selection():
                 event.stop()
                 return
-        if event.key in {"escape", "left", "backspace"}:
+        if event.key in {"escape", "backspace"}:
+            if self._navigate_back():
+                event.stop()
+                return
+        if self.view_mode != "text" and event.key == "left":
             if self._navigate_back():
                 event.stop()
                 return
@@ -175,6 +224,9 @@ class BenchpressObserverApp(App[None]):
     def _command_is_open(self) -> bool:
         return not self.query_one("#command-bar", Horizontal).has_class("hidden")
 
+    def _content_scroll(self) -> VerticalScroll:
+        return self.query_one("#content-scroll", VerticalScroll)
+
     def _restart_refresh_timer(self) -> None:
         if self.refresh_timer is not None:
             self.refresh_timer.stop()
@@ -196,21 +248,50 @@ class BenchpressObserverApp(App[None]):
             self.selected_run_id = None
             self.selected_artifact_index = 0
             return
-        if self.selected_run_id is None or self.snapshot.find_run(self.selected_run_id) is None:
-            self.selected_run_id = self.snapshot.runs[0].run_id
+
+        selectable_runs = self._run_collection_for_view()
+        if self.view_mode == "failures" and not selectable_runs:
+            self.selected_run_id = None
             self.selected_artifact_index = 0
             return
+        if not selectable_runs:
+            selectable_runs = self.snapshot.runs
+
+        if self.selected_run_id is None or not any(
+            run.run_id == self.selected_run_id for run in selectable_runs
+        ):
+            self.selected_run_id = selectable_runs[0].run_id
+            self.selected_artifact_index = 0
+            return
+
         selected_run = self.snapshot.find_run(self.selected_run_id)
         if selected_run is None:
             self.selected_artifact_index = 0
             return
-        if selected_run.artifacts:
+
+        artifacts = self._selected_artifacts(selected_run)
+        if artifacts:
             self.selected_artifact_index = min(
                 self.selected_artifact_index,
-                len(selected_run.artifacts) - 1,
+                len(artifacts) - 1,
             )
         else:
             self.selected_artifact_index = 0
+
+    def _run_collection_for_view(self) -> tuple[ObserverRunState, ...]:
+        if self.snapshot is None:
+            return ()
+        if self.view_mode == "failures":
+            return self.snapshot.failure_runs
+        return self.snapshot.runs
+
+    def _selected_artifacts(self, run: ObserverRunState | None = None) -> tuple:
+        selected_run = run or self._selected_run()
+        if selected_run is None:
+            return ()
+        if self.detail_mode == "triage":
+            return selected_run.triage_artifacts
+        return selected_run.artifacts
 
     def _render(self) -> None:
         self.query_one("#titlebar", Static).update(self._title_text())
@@ -221,18 +302,34 @@ class BenchpressObserverApp(App[None]):
         snapshot_suffix = ""
         if self.snapshot is not None:
             snapshot_suffix = f" | {self.snapshot.db_path}"
-        return Text(f"Benchpress Observer | {self.view_mode}{snapshot_suffix}", style="bold white")
+        if self.view_mode == "detail":
+            view_label = f"detail:{self.detail_mode}"
+        elif self.view_mode == "text":
+            view_label = "text-viewer"
+        else:
+            view_label = self.view_mode
+        return Text(f"Benchpress Observer | {view_label}{snapshot_suffix}", style="bold white")
 
     def _status_text(self) -> Text:
         refresh_text = f"refresh={self.refresh_seconds:g}s"
         loaded_text = ""
         if self.snapshot is not None:
             loaded_text = f" | loaded {self._display_time(self.snapshot.collected_at)}"
+        if self.view_mode == "text":
+            action_text = (
+                " Esc back  Up/Down scroll  Left/Right pan  PgUp/PgDn page "
+                "Home/End jump  terminal selection copy"
+            )
+        elif self.view_mode == "detail":
+            action_text = " : command  ? help  Enter text  e latest error  s summary  Esc back"
+        elif self.view_mode == "failures":
+            action_text = " : command  ? help  Enter triage detail  Up/Down select  Esc back  r reload"
+        elif self.view_mode == "runs":
+            action_text = " : command  ? help  Enter detail  Up/Down select  Esc back  r reload"
+        else:
+            action_text = " : command  ? help  Enter drill down  Esc back  r reload"
         message = f" | {self.status_message}" if self.status_message else ""
-        return Text(
-            " : command  ? help  Enter drill down  Esc back  r reload "
-            f"| {refresh_text}{loaded_text}{message}"
-        )
+        return Text(f"{action_text} | {refresh_text}{loaded_text}{message}")
 
     def _render_content(self):
         if self.snapshot is None:
@@ -241,10 +338,12 @@ class BenchpressObserverApp(App[None]):
             return self._render_dashboard()
         if self.view_mode == "runs":
             return self._render_runs_table()
+        if self.view_mode == "failures":
+            return self._render_failures_table()
         if self.view_mode == "detail":
             return self._render_run_detail()
-        if self.view_mode == "artifact":
-            return self._render_artifact_preview()
+        if self.view_mode == "text":
+            return self._render_text_preview()
         return self._render_help()
 
     def _render_dashboard(self):
@@ -258,7 +357,7 @@ class BenchpressObserverApp(App[None]):
         return Group(
             Panel(summary, title="Dashboard", border_style="green"),
             self._run_collection_panel("Active Runs", snapshot.active_runs),
-            self._run_collection_panel("Recent Failures", snapshot.recent_failures),
+            self._failure_collection_panel("Recent Failures", snapshot.recent_failures),
             self._run_collection_panel("Latest Updates", snapshot.latest_updated_runs),
         )
 
@@ -297,6 +396,44 @@ class BenchpressObserverApp(App[None]):
         if rows_added == 0:
             table.add_row("-", "-", "-", "-", "-", "-", "-")
         return Panel(table, title=title, border_style="blue")
+
+    def _failure_collection_panel(
+        self,
+        title: str,
+        runs: Iterable[ObserverRunState],
+        highlight_selection: bool = False,
+    ) -> Panel:
+        table = Table(show_header=True, header_style="bold red", expand=True)
+        table.add_column("Run")
+        table.add_column("Status")
+        table.add_column("Phase")
+        table.add_column("Audit")
+        table.add_column("VUs", justify="right")
+        table.add_column("Rep", justify="right")
+        table.add_column("Error Type")
+        table.add_column("Error Message")
+        table.add_column("Updated")
+        rows_added = 0
+        for run in runs:
+            rows_added += 1
+            style = ""
+            if highlight_selection and run.run_id == self.selected_run_id:
+                style = "black on bright_cyan"
+            table.add_row(
+                str(run.run_id),
+                run.status,
+                run.phase,
+                run.audit_mode,
+                str(run.virtual_users),
+                str(run.repetition),
+                run.latest_error_type or "-",
+                run.latest_error_message or "-",
+                self._display_time(run.updated_at),
+                style=style,
+            )
+        if rows_added == 0:
+            table.add_row("-", "-", "-", "-", "-", "-", "-", "No triage candidates", "-")
+        return Panel(table, title=title, border_style="red")
 
     def _render_runs_table(self):
         snapshot = self.snapshot
@@ -337,7 +474,28 @@ class BenchpressObserverApp(App[None]):
             border_style="green",
         )
 
+    def _render_failures_table(self):
+        snapshot = self.snapshot
+        if snapshot is None:
+            return Panel("No runs loaded.", border_style="yellow")
+        table = self._failure_collection_panel(
+            "Failure Triage",
+            snapshot.failure_runs,
+            highlight_selection=True,
+        ).renderable
+        return Panel(
+            table,
+            title="Failure Triage",
+            subtitle="Use arrows to select, Enter to open triage detail, :failures to jump here",
+            border_style="red",
+        )
+
     def _render_run_detail(self):
+        if self.detail_mode == "triage":
+            return self._render_failure_detail()
+        return self._render_general_detail()
+
+    def _render_general_detail(self):
         run = self._selected_run()
         if run is None:
             return Panel("No run selected. Use :runs to open the run list.", border_style="yellow")
@@ -348,28 +506,52 @@ class BenchpressObserverApp(App[None]):
             self._json_panel("Summary Metadata", run.summary_metadata),
             self._errors_panel(run),
             self._host_samples_panel(run),
-            self._artifacts_panel(run),
+            self._artifacts_panel(run, run.artifacts),
         ]
         return Group(*sections)
 
-    def _render_artifact_preview(self):
+    def _render_failure_detail(self):
         run = self._selected_run()
         if run is None:
-            return Panel("No run selected.", border_style="yellow")
-        if not run.artifacts:
-            return Panel("Selected run has no artifacts.", border_style="yellow")
-        preview = self.service.preview_artifact(run, self.selected_artifact_index, self.session_config)
-        header_table = Table.grid(padding=(0, 2))
-        header_table.add_column(style="bold cyan")
-        header_table.add_column()
-        header_table.add_row("Artifact", preview.artifact.path.name)
-        header_table.add_row("Type", preview.artifact.artifact_type)
-        header_table.add_row("Created", self._display_time(preview.artifact.created_at))
-        header_table.add_row("Path", str(preview.resolved_path or preview.artifact.path))
-        body = preview.text if preview.previewable else preview.reason
+            return Panel("No failing run selected. Use :failures to open triage.", border_style="yellow")
+        sections = [
+            self._overview_panel(run),
+            self._latest_error_panel(run),
+            self._errors_panel(run, title="Persisted Errors"),
+            self._artifacts_panel(
+                run,
+                run.triage_artifacts,
+                title="Key Artifacts",
+                subtitle=(
+                    "Enter opens the selected artifact in selectable text mode. "
+                    "Press e for the latest error text or s for a synthesized failure summary."
+                ),
+            ),
+            self._metrics_panel("Workload Metrics", run.workload_metrics),
+            self._metrics_panel("Host Metrics", run.host_metrics),
+            self._host_samples_panel(run),
+            self._json_panel("Summary Metadata", run.summary_metadata),
+        ]
+        return Group(*sections)
+
+    def _render_text_preview(self):
+        preview = self.text_preview
+        if preview is None:
+            return Panel("No text preview is open.", border_style="yellow")
+        header_lines = [
+            preview.title,
+            "Selectable text mode: use normal terminal selection and copy.",
+            "Esc returns to the previous view.",
+        ]
+        if preview.artifact is not None:
+            header_lines.append(f"Artifact Type: {preview.artifact.artifact_type}")
+        if preview.resolved_path is not None:
+            header_lines.append(f"Path: {preview.resolved_path}")
+        body = preview.text if preview.previewable else (preview.reason or "Preview is empty.")
         return Group(
-            Panel(header_table, title=f"Run {run.run_id} Artifact", border_style="cyan"),
-            Panel(body or "Preview is empty.", title="Preview", border_style="green"),
+            Text("\n".join(header_lines), style="bold cyan"),
+            Text(""),
+            Text(body, no_wrap=True, overflow="ignore"),
         )
 
     def _render_help(self):
@@ -377,19 +559,27 @@ class BenchpressObserverApp(App[None]):
             [
                 "Views",
                 "  dashboard: default summary view",
-                "  :runs: open the run table",
-                "  Enter: runs -> detail, detail -> artifact preview",
+                "  :runs: open the full run table",
+                "  :failures: open the failure triage table",
+                "  Enter: runs -> detail, failures -> triage detail, detail -> text viewer",
                 "  Esc / Left / Backspace: step back",
+                "",
+                "Text Viewer",
+                "  Uses terminal-native selection and copy; there is no system clipboard integration.",
+                "  Wrapped lines stay off by default so artifacts and errors copy cleanly.",
                 "",
                 "Shortcuts",
                 "  : start command mode",
                 "  ? open this help screen",
                 "  r force an immediate reload",
-                "  Up / Down move the current selection in runs and artifacts",
+                "  Up / Down move the current selection in runs, failures, and artifact lists",
+                "  e open the latest persisted error as selectable text from detail",
+                "  s open a synthesized failure summary as selectable text from detail",
                 "",
                 "Commands",
                 "  :q",
                 "  :runs",
+                "  :failures",
                 "  :dashboard",
                 "  :help",
                 "  :reload",
@@ -436,7 +626,29 @@ class BenchpressObserverApp(App[None]):
             border_style="blue",
         )
 
-    def _errors_panel(self, run: ObserverRunState) -> Panel:
+    def _latest_error_panel(self, run: ObserverRunState) -> Panel:
+        latest_error = run.latest_error
+        if latest_error is None:
+            return Panel(
+                "No persisted errors are available for this run. Press s for a synthesized summary instead.",
+                title="Latest Error",
+                border_style="red",
+            )
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold red")
+        table.add_column()
+        table.add_row("Phase", latest_error.phase)
+        table.add_row("Type", latest_error.exception_type or "-")
+        table.add_row("Created", self._display_time(latest_error.created_at))
+        table.add_row("Message", latest_error.message or "-")
+        return Panel(
+            table,
+            title="Latest Error",
+            subtitle="Press e to open as selectable text",
+            border_style="red",
+        )
+
+    def _errors_panel(self, run: ObserverRunState, title: str = "Errors") -> Panel:
         table = Table(show_header=True, header_style="bold red", expand=True)
         table.add_column("Phase")
         table.add_column("Type")
@@ -452,7 +664,7 @@ class BenchpressObserverApp(App[None]):
                 )
         else:
             table.add_row("-", "-", "No persisted errors", "-")
-        return Panel(table, title="Errors", border_style="red")
+        return Panel(table, title=title, border_style="red")
 
     def _host_samples_panel(self, run: ObserverRunState) -> Panel:
         table = Table(show_header=True, header_style="bold magenta", expand=True)
@@ -476,15 +688,22 @@ class BenchpressObserverApp(App[None]):
             table.add_row("-", "-", "-", "-", "-", "-")
         return Panel(table, title="Host Samples", border_style="magenta")
 
-    def _artifacts_panel(self, run: ObserverRunState) -> Panel:
+    def _artifacts_panel(
+        self,
+        run: ObserverRunState,
+        artifacts: Iterable,
+        title: str = "Artifacts",
+        subtitle: str = "Use arrows to select an artifact, Enter to preview text artifacts",
+    ) -> Panel:
+        artifact_rows = tuple(artifacts)
         table = Table(show_header=True, header_style="bold yellow", expand=True)
         table.add_column("#", justify="right")
         table.add_column("Type")
         table.add_column("Path")
         table.add_column("Description")
         table.add_column("Created")
-        if run.artifacts:
-            for index, artifact in enumerate(run.artifacts):
+        if artifact_rows:
+            for index, artifact in enumerate(artifact_rows):
                 style = "black on bright_cyan" if index == self.selected_artifact_index else ""
                 table.add_row(
                     str(index + 1),
@@ -496,33 +715,30 @@ class BenchpressObserverApp(App[None]):
                 )
         else:
             table.add_row("-", "-", "-", "No artifacts", "-")
-        return Panel(
-            table,
-            title="Artifacts",
-            subtitle="Use arrows to select an artifact, Enter to preview text artifacts",
-            border_style="yellow",
-        )
+        return Panel(table, title=title, subtitle=subtitle, border_style="yellow")
 
     def _move_run_selection(self, delta: int) -> None:
-        snapshot = self.snapshot
-        if snapshot is None or not snapshot.runs:
+        runs = self._run_collection_for_view()
+        if not runs:
             return
         current_index = 0
-        for index, run in enumerate(snapshot.runs):
+        for index, run in enumerate(runs):
             if run.run_id == self.selected_run_id:
                 current_index = index
                 break
-        next_index = max(0, min(len(snapshot.runs) - 1, current_index + delta))
-        self.selected_run_id = snapshot.runs[next_index].run_id
+        next_index = max(0, min(len(runs) - 1, current_index + delta))
+        self.selected_run_id = runs[next_index].run_id
         self.selected_artifact_index = 0
-        self.status_message = f"Selected run {self.selected_run_id}"
+        label = "failure run" if self.view_mode == "failures" else "run"
+        self.status_message = f"Selected {label} {self.selected_run_id}"
         self._render()
 
     def _move_artifact_selection(self, delta: int) -> None:
         run = self._selected_run()
-        if run is None or not run.artifacts:
+        artifacts = self._selected_artifacts(run)
+        if run is None or not artifacts:
             return
-        next_index = max(0, min(len(run.artifacts) - 1, self.selected_artifact_index + delta))
+        next_index = max(0, min(len(artifacts) - 1, self.selected_artifact_index + delta))
         self.selected_artifact_index = next_index
         self.status_message = f"Selected artifact {self.selected_artifact_index + 1} for run {run.run_id}"
         self._render()
@@ -532,39 +748,93 @@ class BenchpressObserverApp(App[None]):
             run = self._selected_run()
             if run is None:
                 return False
-            self.view_mode = "detail"
-            self.selected_artifact_index = 0
-            self.status_message = f"Opened run {run.run_id}"
-            self._render()
+            self._open_run_detail(run, detail_mode="general", return_view="runs")
+            return True
+        if self.view_mode == "failures":
+            run = self._selected_run()
+            if run is None:
+                return False
+            self._open_run_detail(run, detail_mode="triage", return_view="failures")
             return True
         if self.view_mode == "detail":
             run = self._selected_run()
-            if run is None or not run.artifacts:
+            artifacts = self._selected_artifacts(run)
+            if run is None:
                 return False
-            self.view_mode = "artifact"
-            self.status_message = f"Opened artifact preview for run {run.run_id}"
-            self._render()
-            return True
+            if artifacts:
+                preview = self.service.preview_artifact_entry(
+                    run,
+                    artifacts[self.selected_artifact_index],
+                    self.session_config,
+                )
+                self._open_text_preview(preview, f"Opened artifact text for run {run.run_id}")
+                return True
+            if self.detail_mode == "triage":
+                return self._open_latest_error_preview()
         return False
 
+    def _open_run_detail(self, run: ObserverRunState, detail_mode: str, return_view: str) -> None:
+        self.selected_run_id = run.run_id
+        self.detail_mode = detail_mode
+        self.detail_return_view = return_view
+        self.selected_artifact_index = 0
+        self.text_preview = None
+        self.view_mode = "detail"
+        if detail_mode == "triage":
+            self.status_message = f"Opened failure triage for run {run.run_id}"
+        else:
+            self.status_message = f"Opened run {run.run_id}"
+        self._render()
+        self._content_scroll().scroll_home(animate=False, immediate=True)
+
+    def _open_text_preview(self, preview: TextPreview, message: str) -> None:
+        self.text_preview = preview
+        self.view_mode = "text"
+        self.status_message = message
+        self._render()
+        self._content_scroll().scroll_home(animate=False, immediate=True)
+
+    def _open_latest_error_preview(self) -> bool:
+        run = self._selected_run()
+        if run is None:
+            return False
+        preview = self.service.preview_latest_error(run)
+        self._open_text_preview(preview, f"Opened latest error text for run {run.run_id}")
+        return True
+
+    def _open_failure_summary_preview(self) -> bool:
+        run = self._selected_run()
+        if run is None:
+            return False
+        preview = self.service.preview_failure_summary(run)
+        self._open_text_preview(preview, f"Opened failure summary text for run {run.run_id}")
+        return True
+
     def _navigate_back(self) -> bool:
-        if self.view_mode == "artifact":
+        if self.view_mode == "text":
             self.view_mode = "detail"
+            self.text_preview = None
             self.status_message = "Returned to run detail"
             self._render()
             return True
         if self.view_mode == "detail":
-            self.view_mode = "runs"
-            self.status_message = "Returned to run list"
+            self.view_mode = self.detail_return_view
+            self._reconcile_selection()
+            if self.detail_return_view == "failures":
+                self.status_message = "Returned to failure triage"
+            else:
+                self.status_message = "Returned to run list"
             self._render()
             return True
-        if self.view_mode == "runs":
+        if self.view_mode in {"runs", "failures"}:
             self.view_mode = "dashboard"
+            self._reconcile_selection()
             self.status_message = "Returned to dashboard"
             self._render()
             return True
         if self.view_mode == "help":
             self.view_mode = self.return_view
+            self._reconcile_selection()
             self.status_message = "Closed help"
             self._render()
             return True
@@ -573,6 +843,7 @@ class BenchpressObserverApp(App[None]):
     def _toggle_help(self) -> None:
         if self.view_mode == "help":
             self.view_mode = self.return_view
+            self._reconcile_selection()
             self.status_message = "Closed help"
         else:
             self.return_view = self.view_mode
@@ -595,11 +866,22 @@ class BenchpressObserverApp(App[None]):
             return
         if command.name == "runs":
             self.view_mode = "runs"
+            self.text_preview = None
+            self._reconcile_selection()
             self.status_message = "Opened run list"
+            self._render()
+            return
+        if command.name == "failures":
+            self.view_mode = "failures"
+            self.text_preview = None
+            self._reconcile_selection()
+            self.status_message = "Opened failure triage"
             self._render()
             return
         if command.name == "dashboard":
             self.view_mode = "dashboard"
+            self.text_preview = None
+            self._reconcile_selection()
             self.status_message = "Opened dashboard"
             self._render()
             return
@@ -628,11 +910,7 @@ class BenchpressObserverApp(App[None]):
                 self.status_message = f"Run {command.value} not found"
                 self._render()
                 return
-            self.selected_run_id = run.run_id
-            self.selected_artifact_index = 0
-            self.view_mode = "detail"
-            self.status_message = f"Opened run {run.run_id}"
-            self._render()
+            self._open_run_detail(run, detail_mode="general", return_view="runs")
 
     def _selected_run(self) -> ObserverRunState | None:
         if self.snapshot is None or self.selected_run_id is None:

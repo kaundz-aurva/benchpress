@@ -153,8 +153,11 @@ Key interactions:
 - `:` opens command mode.
 - `:q` quits.
 - `:runs` opens the run table from the dashboard.
+- `:failures` opens the failure-triage table for failed runs and persisted errors.
 - Arrow keys move the current selection in the run and artifact lists.
-- `Enter` drills from runs into details, then into previewable text artifacts.
+- `Enter` drills from runs into details, from failures into triage detail, and from detail into the selectable text viewer.
+- In run detail, `e` opens the latest persisted error as selectable text and `s` opens a synthesized failure summary.
+- The selectable text viewer is designed for normal terminal mouse selection and copy/paste; it does not integrate with the system clipboard.
 - `?` opens the shortcuts/commands help screen.
 - `:refresh 5` changes the auto-refresh interval to 5 seconds.
 

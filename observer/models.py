@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from reporting.models import HostMetricSample, ReportArtifact, ReportSourceRun
+from reporting.models import HostMetricSample, ReportArtifact, ReportError, ReportSourceRun
 
 
 @dataclass(frozen=True)
@@ -13,11 +13,15 @@ class ObserverRunState:
     workload_metrics: dict[str, Any] = field(default_factory=dict)
     host_metrics: dict[str, float | int] = field(default_factory=dict)
     host_samples: tuple[HostMetricSample, ...] = ()
+    latest_error: ReportError | None = None
+    triage_artifacts: tuple[ReportArtifact, ...] = ()
+    failure_candidate: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "workload_metrics", dict(self.workload_metrics))
         object.__setattr__(self, "host_metrics", dict(self.host_metrics))
         object.__setattr__(self, "host_samples", tuple(self.host_samples))
+        object.__setattr__(self, "triage_artifacts", tuple(self.triage_artifacts))
 
     @property
     def run_id(self) -> int:
@@ -97,7 +101,19 @@ class ObserverRunState:
 
     @property
     def has_failures(self) -> bool:
-        return bool(self.errors) or self.status != "success"
+        return self.failure_candidate
+
+    @property
+    def latest_error_type(self) -> str:
+        if self.latest_error is None:
+            return ""
+        return self.latest_error.exception_type
+
+    @property
+    def latest_error_message(self) -> str:
+        if self.latest_error is None:
+            return ""
+        return self.latest_error.message
 
 
 @dataclass(frozen=True)
@@ -109,6 +125,7 @@ class ObserverSnapshot:
     status_counts: dict[str, int] = field(default_factory=dict)
     phase_counts: dict[str, int] = field(default_factory=dict)
     active_runs: tuple[ObserverRunState, ...] = ()
+    failure_runs: tuple[ObserverRunState, ...] = ()
     recent_failures: tuple[ObserverRunState, ...] = ()
     latest_updated_runs: tuple[ObserverRunState, ...] = ()
 
@@ -119,6 +136,7 @@ class ObserverSnapshot:
         object.__setattr__(self, "status_counts", dict(self.status_counts))
         object.__setattr__(self, "phase_counts", dict(self.phase_counts))
         object.__setattr__(self, "active_runs", tuple(self.active_runs))
+        object.__setattr__(self, "failure_runs", tuple(self.failure_runs))
         object.__setattr__(self, "recent_failures", tuple(self.recent_failures))
         object.__setattr__(self, "latest_updated_runs", tuple(self.latest_updated_runs))
 
@@ -130,8 +148,10 @@ class ObserverSnapshot:
 
 
 @dataclass(frozen=True)
-class ArtifactPreview:
-    artifact: ReportArtifact
+class TextPreview:
+    source_kind: str
+    title: str
+    artifact: ReportArtifact | None
     resolved_path: Path | None
     previewable: bool
     text: str = ""

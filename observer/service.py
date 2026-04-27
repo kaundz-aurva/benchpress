@@ -17,9 +17,9 @@ from observer.constants import (
     TEXT_PREVIEW_SUFFIXES,
 )
 from observer.dto import ObserverSessionConfig
-from observer.models import ArtifactPreview, ObserverRunState, ObserverSnapshot
+from observer.models import ObserverRunState, ObserverSnapshot, TextPreview
 from reporting.constants import ARTIFACT_FALLBACK_FILENAMES, THROUGHPUT_METRIC_KEYS, WORKLOAD_SUMMARY_KEY
-from reporting.models import ReportSourceRun
+from reporting.models import ReportArtifact, ReportError, ReportSourceRun
 from reporting.host_metrics import load_host_metrics
 from reporting.repository import ReportingRepository
 
@@ -52,11 +52,11 @@ class ObserverService:
             for run in sorted_by_update
             if run.status in ACTIVE_STATUSES
         )[:DASHBOARD_ACTIVE_LIMIT]
-        recent_failures = tuple(
+        failure_runs = tuple(
             run
             for run in sorted_by_update
             if run.has_failures
-        )[:DASHBOARD_FAILURE_LIMIT]
+        )
 
         return ObserverSnapshot(
             db_path=config.db_path,
@@ -66,7 +66,8 @@ class ObserverService:
             status_counts=dict(Counter(run.status for run in runs)),
             phase_counts=dict(Counter(run.phase for run in runs)),
             active_runs=active_runs,
-            recent_failures=recent_failures,
+            failure_runs=failure_runs,
+            recent_failures=failure_runs[:DASHBOARD_FAILURE_LIMIT],
             latest_updated_runs=sorted_by_update[:DASHBOARD_UPDATED_LIMIT],
         )
 
@@ -75,46 +76,62 @@ class ObserverService:
         run: ObserverRunState,
         artifact_index: int,
         config: ObserverSessionConfig,
-    ) -> ArtifactPreview:
+    ) -> TextPreview:
         if artifact_index < 0 or artifact_index >= len(run.artifacts):
             raise IndexError("artifact_index out of range")
+        return self.preview_artifact_entry(run, run.artifacts[artifact_index], config)
 
-        artifact = run.artifacts[artifact_index]
+    def preview_artifact_entry(
+        self,
+        run: ObserverRunState,
+        artifact: ReportArtifact,
+        config: ObserverSessionConfig,
+    ) -> TextPreview:
         path = _resolve_artifact_path(
             artifact.path,
             run.output_dir,
             config.artifact_root,
         )
         if path is None:
-            return ArtifactPreview(
+            return TextPreview(
+                source_kind="artifact",
+                title=f"{artifact.artifact_type} | {artifact.path.name}",
                 artifact=artifact,
                 resolved_path=None,
                 previewable=False,
                 reason="artifact path is outside the trusted artifact root",
             )
         if not path.exists():
-            return ArtifactPreview(
+            return TextPreview(
+                source_kind="artifact",
+                title=f"{artifact.artifact_type} | {artifact.path.name}",
                 artifact=artifact,
                 resolved_path=path,
                 previewable=False,
                 reason="artifact file is missing",
             )
         if not path.is_file():
-            return ArtifactPreview(
+            return TextPreview(
+                source_kind="artifact",
+                title=f"{artifact.artifact_type} | {artifact.path.name}",
                 artifact=artifact,
                 resolved_path=path,
                 previewable=False,
                 reason="artifact path is not a regular file",
             )
         if path.suffix.lower() not in TEXT_PREVIEW_SUFFIXES:
-            return ArtifactPreview(
+            return TextPreview(
+                source_kind="artifact",
+                title=f"{artifact.artifact_type} | {artifact.path.name}",
                 artifact=artifact,
                 resolved_path=path,
                 previewable=False,
                 reason="only small text artifacts can be previewed inline",
             )
         if path.stat().st_size > config.preview_bytes:
-            return ArtifactPreview(
+            return TextPreview(
+                source_kind="artifact",
+                title=f"{artifact.artifact_type} | {artifact.path.name}",
                 artifact=artifact,
                 resolved_path=path,
                 previewable=False,
@@ -124,11 +141,54 @@ class ObserverService:
         text = path.read_text(encoding="utf-8", errors="replace")
         if path.suffix.lower() == ".json":
             text = _pretty_json_text(text)
-        return ArtifactPreview(
+        return TextPreview(
+            source_kind="artifact",
+            title=f"{artifact.artifact_type} | {artifact.path.name}",
             artifact=artifact,
             resolved_path=path,
             previewable=True,
             text=text,
+        )
+
+    def preview_latest_error(self, run: ObserverRunState) -> TextPreview:
+        latest_error = run.latest_error
+        if latest_error is None:
+            return TextPreview(
+                source_kind="error",
+                title=f"Run {run.run_id} Latest Error",
+                artifact=None,
+                resolved_path=None,
+                previewable=False,
+                reason="run has no persisted errors",
+            )
+        body = "\n".join(
+            [
+                f"Run: {run.run_id}",
+                f"Status: {run.status}",
+                f"Phase: {run.phase}",
+                f"Created: {latest_error.created_at}",
+                f"Exception Type: {latest_error.exception_type or '-'}",
+                "Message:",
+                latest_error.message or "-",
+            ]
+        )
+        return TextPreview(
+            source_kind="error",
+            title=f"Run {run.run_id} Latest Error",
+            artifact=None,
+            resolved_path=None,
+            previewable=True,
+            text=body,
+        )
+
+    def preview_failure_summary(self, run: ObserverRunState) -> TextPreview:
+        return TextPreview(
+            source_kind="failure_summary",
+            title=f"Run {run.run_id} Failure Summary",
+            artifact=None,
+            resolved_path=None,
+            previewable=True,
+            text=_failure_summary_text(run),
         )
 
     def _run_state_for(
@@ -169,11 +229,15 @@ class ObserverService:
             for key, value in _artifact_metrics(source_run, config.artifact_root).items():
                 workload_metrics.setdefault(key, value)
         host_metrics, host_samples = load_host_metrics(source_run, config.artifact_root, cache=None)
+        latest_error = _latest_error(source_run.errors)
         return ObserverRunState(
             source_run=source_run,
             workload_metrics=workload_metrics,
             host_metrics=host_metrics,
             host_samples=host_samples,
+            latest_error=latest_error,
+            triage_artifacts=_ordered_key_artifacts(source_run.artifacts),
+            failure_candidate=_is_failure_candidate(source_run, latest_error),
         )
 
 
@@ -372,6 +436,95 @@ def _path_signature(path: Path | None) -> tuple[str, int, int] | None:
 
 def _updated_sort_key(run: ObserverRunState) -> tuple[float, int]:
     return (_timestamp_sort_value(run.updated_at), run.run_id)
+
+
+def _latest_error(errors: Iterable[ReportError]) -> ReportError | None:
+    latest: ReportError | None = None
+    for error in errors:
+        if latest is None:
+            latest = error
+            continue
+        if (_timestamp_sort_value(error.created_at), error.error_id) >= (
+            _timestamp_sort_value(latest.created_at),
+            latest.error_id,
+        ):
+            latest = error
+    return latest
+
+
+def _ordered_key_artifacts(artifacts: Iterable[ReportArtifact]) -> tuple[ReportArtifact, ...]:
+    return tuple(
+        sorted(
+            artifacts,
+            key=lambda artifact: (
+                _artifact_priority(artifact.artifact_type),
+                -_timestamp_sort_value(artifact.created_at),
+                artifact.artifact_id,
+            ),
+        )
+    )
+
+
+def _artifact_priority(artifact_type: str) -> tuple[int, str]:
+    normalized = artifact_type.strip().lower()
+    priority = {
+        "workload_output": 0,
+        "host_metrics": 1,
+        "host_metrics_csv": 2,
+        "database_pre_snapshot": 3,
+        "database_post_snapshot": 4,
+    }.get(normalized, 99)
+    return (priority, normalized)
+
+
+def _is_failure_candidate(source_run: ReportSourceRun, latest_error: ReportError | None) -> bool:
+    return latest_error is not None or source_run.status == "failed"
+
+
+def _failure_summary_text(run: ObserverRunState) -> str:
+    lines = [
+        f"Run: {run.run_id}",
+        f"Benchmark: {run.benchmark_name}",
+        f"Workload: {run.workload_name} ({run.workload_tool})",
+        f"Audit: {run.audit_mode}",
+        f"Virtual Users: {run.virtual_users}",
+        f"Repetition: {run.repetition}",
+        f"Status: {run.status}",
+        f"Phase: {run.phase}",
+        f"Created: {run.created_at}",
+        f"Updated: {run.updated_at}",
+        f"Output Dir: {run.output_dir}",
+        "",
+        "Latest Error:",
+    ]
+    if run.latest_error is None:
+        lines.append("  none")
+    else:
+        lines.extend(
+            [
+                f"  Phase: {run.latest_error.phase}",
+                f"  Type: {run.latest_error.exception_type or '-'}",
+                f"  Created: {run.latest_error.created_at}",
+                "  Message:",
+                f"    {run.latest_error.message or '-'}",
+            ]
+        )
+    lines.extend(["", "Persisted Errors:"])
+    if not run.errors:
+        lines.append("  none")
+    else:
+        for error in run.errors:
+            lines.append(
+                "  - "
+                f"{error.created_at} | {error.phase} | {error.exception_type or '-'} | {error.message or '-'}"
+            )
+    lines.extend(["", "Key Artifacts:"])
+    if not run.triage_artifacts:
+        lines.append("  none")
+    else:
+        for artifact in run.triage_artifacts:
+            lines.append(f"  - {artifact.artifact_type}: {artifact.path}")
+    return "\n".join(lines)
 
 
 def _timestamp_sort_value(value: str) -> float:

@@ -28,6 +28,8 @@ def parse_command(text: str) -> ObserverCommand:
         return ObserverCommand("quit")
     if normalized_name == "runs":
         return ObserverCommand("runs")
+    if normalized_name in {"failures", "failure"}:
+        return ObserverCommand("failures")
     if normalized_name in {"dashboard", "dash"}:
         return ObserverCommand("dashboard")
     if normalized_name == "help":
